@@ -24,6 +24,8 @@ dependencies:
 - containers
 - text
 - pretty
+- mtl
+- HUnit
 
 ghc-options:
 - -Wall

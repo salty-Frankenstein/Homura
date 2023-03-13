@@ -11,7 +11,7 @@ import Common
 newtype OpTag = OpTag T.Text deriving (Show, Eq)
 
 newtype TVar = TV T.Text
-  deriving Show
+  deriving (Show, Eq)
 
 data PureType
   = TVar TVar
@@ -20,6 +20,7 @@ data PureType
   | THandler DirtyType DirtyType
   | TSum PureType PureType
   | TProd PureType PureType 
+  deriving Eq
 
 typeInt = TCon "Int"
 typeBool = TCon "Bool"
@@ -28,9 +29,10 @@ typeBottom = TCon "Bottom"
 
 data DirtyType
   = DirtyType PureType Dirt
+  deriving Eq
 
 newtype Dirt = Dirt (Set.Set T.Text)
-  deriving Show
+  deriving (Show, Eq)
 
 instance Pretty PureType where
   ppr _ (TVar (TV v)) = "TVar" <+> text' v

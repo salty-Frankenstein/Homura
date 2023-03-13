@@ -1,4 +1,5 @@
-module Desugar where
+{-# LANGUAGE OverloadedStrings #-}
+module Desugar (desugar) where
 
 import Common
 import qualified Syntax as S 
@@ -13,7 +14,7 @@ desugar sc = case sc of
   S.Ret e -> C.Ret (desugarExpr e)
   S.App e1 e2 -> C.App (desugarExpr e1) (desugarExpr e2)
   S.If e c1 c2 -> C.If (desugarExpr e) (desugar c1) (desugar c2)
-  S.OpCall op e x c -> C.OpCall op (desugarExpr e) x (desugar c)
+  S.OpCall op e -> C.OpCall op (desugarExpr e) "y" (C.Ret (C.Var "y"))
   S.WithHandle e c -> C.WithHandle (desugarExpr e) (desugar c)
   S.Absurd d e -> C.Absurd d (desugarExpr e)
   S.Let x c1 c2 -> C.Let x (desugar c1) (desugar c2)

@@ -16,6 +16,7 @@ data Expr
   -- builtin arithmetrics
   | Arith Arith
   | ADT ADT
+  deriving Eq
 
 -- algebraic data types
 -- TODO: remove this?
@@ -26,22 +27,25 @@ data ADT
   | Cons Id [Expr]
   | Fold Expr
   | Unfold Expr
+  deriving Eq
 
 -- TODO: Add more
-data Arith = BOp BOp Expr Expr | UOp UOp Expr deriving Show
+data Arith = BOp BOp Expr Expr | UOp UOp Expr deriving (Show, Eq)
 data BOp = Add | Sub | Mul | Div | Eq | Lt | Gt | And | Or
-  deriving Show
+  deriving (Show, Eq)
 data UOp = Neg | Not
-  deriving Show
+  deriving (Show, Eq)
 
 data Lit
   = LInt Int
   | LBool Bool
   | LUnit
+  deriving Eq
 
 data OpCase
   = Nil DirtyType
   | OpCase OpTag Id Id Computation OpCase
+  deriving Eq
 
 data Computation
   = Ret Expr
@@ -55,11 +59,13 @@ data Computation
   | CaseSum Expr Id Computation Id Computation
   | CaseProd Expr Id Id Computation
   | Case Expr Id [Id] Computation Computation
+  deriving Eq
 
 -- the result of evaluation
 data Result
   = VRet Expr
   | VOpCall OpTag Expr Id Computation
+  deriving Eq
 
 -- pretty printing AST
 instance Pretty Lit where

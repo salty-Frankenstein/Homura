@@ -50,7 +50,7 @@ data Computation
   = Ret Expr
   | App Expr Expr
   | If Expr Computation Computation
-  | OpCall OpTag Expr Id Computation
+  | OpCall OpTag Expr
   | WithHandle Expr Computation
   | Absurd DirtyType Expr
   | Let Id Computation Computation
@@ -136,7 +136,7 @@ instance AST Computation where
   freeVars (Ret e)                  = freeVars e
   freeVars (App e1 e2)              = freeVars e1 \/ freeVars e2
   freeVars (If e c1 c2)             = freeVars e \/ freeVars c1 \/ freeVars c2
-  freeVars (OpCall (OpTag _) e y c) = freeVars e \/ (freeVars c \\ Set.singleton y)
+  freeVars (OpCall (OpTag _) e)     = freeVars e
   freeVars (WithHandle h c)         = freeVars h \/ freeVars c
   freeVars (Absurd _ e)             = freeVars e
   freeVars (Let x c1 c2)            = freeVars c1 \/ (freeVars c2 \\ Set.singleton x)
@@ -219,8 +219,8 @@ instance Pretty Computation where
   ppr p (App a b) = parensIf p $ ppr 1 a <+> ppr 1 b
   ppr p (If e c1 c2) = parensIf p $
       "if" <+> pp e <+> "then" <+> pp c1 <+> "else" <+> pp c2
-  ppr p (OpCall (OpTag op) x y c) = text' op 
-    <> parens (pp x <> semi <+> text' y <> char '.' <+> pp c)
+  ppr p (OpCall (OpTag op) x) = text' op 
+    <> parens (pp x)
   ppr p (WithHandle h c) = parensIf p $ "with" <+> ppr 1 h <+> "handle" <+> ppr 1 c
   ppr p (Absurd _ e) = parensIf p $ "absurd" <+> ppr 1 e
   ppr p (Let x c1 c2) = parensIf p $ "let" <+> text' x <+> text "<-" <+> ppr 1 c1 <+> text "in" <+> ppr 1 c2  
