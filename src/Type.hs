@@ -1,7 +1,12 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Type where
 
+import Prelude hiding ((<>))
 import qualified Data.Text as T
 import qualified Data.Set as Set
+import Utils.Pretty
+import Text.PrettyPrint
+import Common
 
 newtype OpTag = OpTag T.Text deriving (Show, Eq)
 
@@ -10,14 +15,38 @@ newtype TVar = TV T.Text
 
 data PureType
   = TVar TVar
-  | TCon String -- TODO: top, bottom, int, bool
+  | TCon Id -- TODO: top, bottom, int, bool
   | TFunc PureType DirtyType
   | THandler DirtyType DirtyType
-  deriving Show
+  | TSum PureType PureType
+  | TProd PureType PureType 
+
+typeInt = TCon "Int"
+typeBool = TCon "Bool"
+typeTop = TCon "Top"
+typeBottom = TCon "Bottom"
 
 data DirtyType
   = DirtyType PureType Dirt
-  deriving Show
 
 newtype Dirt = Dirt (Set.Set T.Text)
   deriving Show
+
+instance Pretty PureType where
+  ppr _ (TVar (TV v)) = "TVar" <+> text' v
+  ppr _ (TCon c) = "TCon" <+> text' c
+  ppr p (TFunc t1 t2) = parensIf p $ ppr 1 t1 <+> "->" <+> ppr 1 t2
+  ppr p (THandler t1 t2) = parensIf p $ ppr 1 t1 <+> "=>" <+> ppr 1 t2
+  ppr p (TSum t1 t2) = parensIf p $ ppr 1 t1 <+> "+" <+> ppr 1 t2
+  ppr p (TProd t1 t2) = parensIf p $ ppr 1 t1 <+> "*" <+> ppr 1 t2
+
+instance Pretty DirtyType where
+  ppr p (DirtyType t1 t2) = parensIf p $ ppr 1 t1 <+> "!" <+> ppr 1 t2
+
+instance Pretty Dirt where
+  ppr _ (Dirt t) = text $ show t
+
+instance Show PureType where 
+  show = render . pp 
+instance Show DirtyType where 
+  show = render . pp

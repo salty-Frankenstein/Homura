@@ -25,10 +25,14 @@ source-repository head
 
 library
   exposed-modules:
+      Common
       Core
+      Desugar
       Lib.Arith
       Lib.EDSL
+      Syntax
       Type
+      Utils.Pretty
   other-modules:
       Paths_homura
   hs-source-dirs:
