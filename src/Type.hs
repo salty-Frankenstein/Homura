@@ -8,10 +8,13 @@ import Utils.Pretty
 import Text.PrettyPrint
 import Common
 
-newtype OpTag = OpTag T.Text deriving (Show, Eq)
+newtype OpTag = OpTag T.Text deriving (Show, Eq, Ord)
 
 newtype TVar = TV T.Text
-  deriving (Show, Eq)
+  deriving (Show, Eq, Ord)
+
+newtype DVar = DV T.Text
+  deriving (Show, Eq, Ord)
 
 data PureType
   = TVar TVar
@@ -20,7 +23,7 @@ data PureType
   | THandler DirtyType DirtyType
   | TSum PureType PureType
   | TProd PureType PureType 
-  deriving Eq
+  deriving (Eq, Ord)
 
 typeInt = TCon "Int"
 typeBool = TCon "Bool"
@@ -29,10 +32,11 @@ typeBottom = TCon "Bottom"
 
 data DirtyType
   = DirtyType PureType Dirt
-  deriving Eq
+  deriving (Eq, Ord)
 
-newtype Dirt = Dirt (Set.Set T.Text)
-  deriving (Show, Eq)
+-- TODO: check this definition later
+data Dirt = Dirt (Set.Set OpTag) DVar
+  deriving (Show, Eq, Ord)
 
 instance Pretty PureType where
   ppr _ (TVar (TV v)) = "TVar" <+> text' v
@@ -46,7 +50,7 @@ instance Pretty DirtyType where
   ppr p (DirtyType t1 t2) = parensIf p $ ppr 1 t1 <+> "!" <+> ppr 1 t2
 
 instance Pretty Dirt where
-  ppr _ (Dirt t) = text $ show t
+  ppr _ (Dirt t d) = text $ show t ++ " | " ++ show d
 
 instance Show PureType where 
   show = render . pp 

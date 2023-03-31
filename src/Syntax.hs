@@ -63,6 +63,10 @@ data Pattern
   | PVar Id
   -- TODO: Lit?
 
+traverseOcs :: OpCase -> [(OpTag, Id, Id, Computation)]
+traverseOcs (Nil _) = []
+traverseOcs (OpCase op x k c ocs) = (op, x, k, c) : traverseOcs ocs
+
 instance Show Expr where
   show = render . pp 
 instance Show Computation where

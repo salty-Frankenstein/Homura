@@ -28,6 +28,7 @@ library
       Common
       Core
       Desugar
+      Infer
       Lib.Arith
       Lib.EDSL
       Syntax

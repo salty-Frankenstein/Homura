@@ -5,6 +5,9 @@ import Desugar
 import Lib.EDSL
 import Lib.Arith
 import Test.HUnit
+import Infer
+import Type
+import qualified Data.Map as Map
 
 decls = [
     S.DataDecl "Expr" [
@@ -71,6 +74,9 @@ pickTrue = handler "x" (ret "x")
 run = C.exec' . desugar
 cres = C.VRet . C.Lit . C.LInt
 
+t :: InferM (InferRes PureType)
+t = collectConstraints (Context Map.empty Map.empty) pickTrue
+
 main :: IO ()
 main = do
   putStrLn ""
@@ -86,5 +92,7 @@ main = do
       test2 = TestCase (assertEqual "test2" res1 (cres 10))
       test3 = TestCase (assertEqual "test3" res2 (cres 25))
   _ <- runTestTT (TestList $ test1 ++ [test2, test3])
-  
+
+  runInferIO pickTrue (Map.fromList [(OpTag "decide", (typeTop, typeBool))])
+
   return ()
