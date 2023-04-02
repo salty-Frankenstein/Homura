@@ -5,7 +5,8 @@ import Desugar
 import Lib.EDSL
 import Lib.Arith
 import Test.HUnit
-import Infer
+import Infer.Infer
+import Infer.Unify
 import Type
 import qualified Data.Map as Map
 
@@ -74,8 +75,21 @@ pickTrue = handler "x" (ret "x")
 run = C.exec' . desugar
 cres = C.VRet . C.Lit . C.LInt
 
-t :: InferM (InferRes PureType)
-t = collectConstraints (Context Map.empty Map.empty) pickTrue
+-- t :: InferM (InferRes PureType)
+-- t = collectConstraints (Context Map.empty Map.empty) pickTrue
+
+testInfer :: (Show r, Collect a r) => a -> Signature -> IO ()
+testInfer x s = do
+  res <- runInferIO x s
+  putStrLn "----------\nunification:"
+  case res of
+    Right (Res _ _ c) -> case runUnify c of
+      Left s -> putStrLn $ "error in unification"
+      Right (UnifyState s c _) -> do
+        putStrLn $ "the result susbtution is: " ++ show s
+        putStrLn $ "the result constraint set is: " ++ show c
+    _ -> return ()
+
 
 main :: IO ()
 main = do
@@ -93,6 +107,8 @@ main = do
       test3 = TestCase (assertEqual "test3" res2 (cres 25))
   _ <- runTestTT (TestList $ test1 ++ [test2, test3])
 
-  runInferIO pickTrue (Map.fromList [(OpTag "decide", (typeTop, typeBool))])
+  let decideSig = Map.fromList [(OpTag "decide", (typeTop, typeBool))]
+  testInfer pickTrue decideSig
+  -- testInfer chooseDiff decideSig
 
   return ()

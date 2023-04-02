@@ -2,13 +2,15 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE FlexibleInstances #-}
-module Infer where
+module Infer.Infer (Constraint(..), runInfer, runInferIO
+                  , InferM, InferRes(..), Collect(..)
+                  , Signature) where
 
 import Common
 import Syntax
 import Type
 import qualified Data.Map as Map
-import qualified Data.Set as Set 
+import qualified Data.Set.Monad as Set 
 import Control.Monad.State
 import Control.Monad.Writer
 import Control.Monad.Reader
@@ -19,7 +21,6 @@ data Constraint
   | CDirtyTLE DirtyType DirtyType  -- a dirty type is smaller than another
   | CDirtLE Dirt Dirt              -- a dirt is smaller than another
   deriving (Eq, Ord)
-  -- TODO: Eq?
 
 instance Show Constraint where
   show (CPureTLE p1 p2) = show p1 ++ " <= " ++ show p2
@@ -70,11 +71,6 @@ class (MonadState [Id] m        -- a stream of global fresh names
     case Map.lookup op signature of
       Just x -> return x
       Nothing -> throwError $ "undefined operation: " ++ show op
-
-  -- getFreshTVar :: m TVar 
-  -- getFreshTVar = TV <$> getFreshName
-  -- getFreshDVar :: m DVar 
-  -- getFreshDVar = DV <$> getFreshName
 
 class Collect a r | a -> r where
 -- the algorithm to collect constraints from the AST
@@ -256,7 +252,8 @@ runInfer e signature =
   evalState (runWriterT (runReaderT 
     (runExceptT (collectConstraints emptyCtx e)) signature)) letters
 
-runInferIO :: (Show r, Collect p r) => p -> Signature -> IO ()
+runInferIO :: (Show r, Collect p r) => p -> Signature 
+                                    -> IO (Either String (InferRes r))
 runInferIO e signature = do
     let (res, info) = runInfer e signature
     case res of
@@ -264,4 +261,5 @@ runInferIO e signature = do
       Left err -> putStrLn $ "error in typechecking: " ++ err
     putStrLn "-------------------"
     putStrLn $ "log: " ++ info
+    return res
 

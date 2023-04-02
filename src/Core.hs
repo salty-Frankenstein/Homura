@@ -2,7 +2,7 @@
 module Core where
 import Prelude hiding ((<>))
 import qualified Data.Text as T
-import qualified Data.Set as Set
+import qualified Data.Set.Monad as Set
 import Text.PrettyPrint
 import Type
 import Utils.Pretty

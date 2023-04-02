@@ -3,7 +3,7 @@ module Type where
 
 import Prelude hiding ((<>))
 import qualified Data.Text as T
-import qualified Data.Set as Set
+import qualified Data.Set.Monad as Set
 import Utils.Pretty
 import Text.PrettyPrint
 import Common

@@ -26,6 +26,7 @@ dependencies:
 - pretty
 - mtl
 - HUnit
+- set-monad
 
 ghc-options:
 - -Wall

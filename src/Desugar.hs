@@ -1,69 +1,73 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE FunctionalDependencies #-}
 module Desugar (desugar) where
 
 import Common
 import qualified Syntax as S 
 import qualified Core as C 
 import qualified Data.Text as T
-import qualified Data.Set as Set
+import qualified Data.Set.Monad as Set
 import Data.List (partition)
 import Data.Maybe (catMaybes)
 
-desugar :: S.Computation -> C.Computation
-desugar sc = case sc of
-  S.Ret e -> C.Ret (desugarExpr e)
-  S.App e1 e2 -> C.App (desugarExpr e1) (desugarExpr e2)
-  S.If e c1 c2 -> C.If (desugarExpr e) (desugar c1) (desugar c2)
-  S.OpCall op e -> C.OpCall op (desugarExpr e) "y" (C.Ret (C.Var "y"))
-  S.WithHandle e c -> C.WithHandle (desugarExpr e) (desugar c)
-  S.Absurd d e -> C.Absurd d (desugarExpr e)
-  S.Let x c1 c2 -> C.Let x (desugar c1) (desugar c2)
-  S.LetRec f x c1 c2 -> C.LetRec f x (desugar c1) (desugar c2)
-  cs@S.Case{} -> desugarCase cs
+class Desugar a r | a -> r where
+  desugar :: a -> r
 
-desugarExpr :: S.Expr -> C.Expr
-desugarExpr se = case se of
-  S.Var x -> C.Var x
-  S.Lit v -> C.Lit (desugarLit v)
-  S.Abs x c -> C.Abs x (desugar c)
-  S.Handler x p c ocs -> C.Handler x p (desugar c) (desugarOp ocs)
-  S.Arith a -> C.Arith (desugarArith a)
-  S.ADT a -> C.ADT (desugarADT a)
+instance Desugar S.Computation C.Computation where
+  desugar sc = case sc of
+    S.Ret e -> C.Ret (desugar e)
+    S.App e1 e2 -> C.App (desugar e1) (desugar e2)
+    S.If e c1 c2 -> C.If (desugar e) (desugar c1) (desugar c2)
+    S.OpCall op e -> C.OpCall op (desugar e) "y" (C.Ret (C.Var "y"))
+    S.WithHandle e c -> C.WithHandle (desugar e) (desugar c)
+    S.Absurd d e -> C.Absurd d (desugar e)
+    S.Let x c1 c2 -> C.Let x (desugar c1) (desugar c2)
+    S.LetRec f x c1 c2 -> C.LetRec f x (desugar c1) (desugar c2)
+    cs@S.Case{} -> desugarCase cs
 
-desugarLit :: S.Lit -> C.Lit
-desugarLit (S.LInt i) = C.LInt i
-desugarLit (S.LBool b) = C.LBool b
-desugarLit S.LUnit = C.LUnit
+instance Desugar S.Expr C.Expr where
+  desugar se = case se of
+    S.Var x -> C.Var x
+    S.Lit v -> C.Lit (desugar v)
+    S.Abs x c -> C.Abs x (desugar c)
+    S.Handler x p c ocs -> C.Handler x p (desugar c) (desugar ocs)
+    S.Arith a -> C.Arith (desugar a)
+    S.ADT a -> C.ADT (desugar a)
 
-desugarOp :: S.OpCase -> C.OpCase
-desugarOp (S.Nil x) = C.Nil x
-desugarOp (S.OpCase op x k c ocs) = C.OpCase op x k (desugar c) (desugarOp ocs)
+instance Desugar S.Lit C.Lit where
+  desugar (S.LInt i) = C.LInt i
+  desugar (S.LBool b) = C.LBool b
+  desugar S.LUnit = C.LUnit
 
-desugarADT :: S.ADT -> C.ADT
-desugarADT (S.Inl e) = C.Inl (desugarExpr e)
-desugarADT (S.Inr e) = C.Inr (desugarExpr e)
-desugarADT (S.Prod e1 e2) = C.Prod (desugarExpr e1) (desugarExpr e2)
-desugarADT (S.Cons c es) = C.Cons c (desugarExpr <$> es)
-desugarADT (S.Fold e) = C.Fold (desugarExpr e)
-desugarADT (S.Unfold e) = C.Unfold (desugarExpr e)
+instance Desugar S.OpCase C.OpCase where
+  desugar (S.Nil x) = C.Nil x
+  desugar (S.OpCase op x k c ocs) = C.OpCase op x k (desugar c) (desugar ocs)
 
-desugarArith :: S.Arith -> C.Arith
-desugarArith (S.BOp b e1 e2) = C.BOp (toCore b) (desugarExpr e1) (desugarExpr e2)
-  where
-    toCore b = case b of
-      S.Add -> C.Add
-      S.Sub -> C.Sub
-      S.Mul -> C.Mul
-      S.Div -> C.Div
-      S.Eq -> C.Eq
-      S.Lt -> C.Lt
-      S.Gt -> C.Gt
-      S.And -> C.And
-      S.Or -> C.Or
-desugarArith (S.UOp u e) = C.UOp (toCore u) (desugarExpr e)
-  where
-    toCore S.Neg = C.Neg
-    toCore S.Not = C.Not
+instance Desugar S.ADT C.ADT where
+  desugar (S.Inl e) = C.Inl (desugar e)
+  desugar (S.Inr e) = C.Inr (desugar e)
+  desugar (S.Prod e1 e2) = C.Prod (desugar e1) (desugar e2)
+  desugar (S.Cons c es) = C.Cons c (desugar <$> es)
+  desugar (S.Fold e) = C.Fold (desugar e)
+  desugar (S.Unfold e) = C.Unfold (desugar e)
+
+instance Desugar S.Arith C.Arith where
+  desugar (S.BOp b e1 e2) = C.BOp (toCore b) (desugar e1) (desugar e2)
+    where
+      toCore b = case b of
+        S.Add -> C.Add
+        S.Sub -> C.Sub
+        S.Mul -> C.Mul
+        S.Div -> C.Div
+        S.Eq -> C.Eq
+        S.Lt -> C.Lt
+        S.Gt -> C.Gt
+        S.And -> C.And
+        S.Or -> C.Or
+  desugar (S.UOp u e) = C.UOp (toCore u) (desugar e)
+    where
+      toCore S.Neg = C.Neg
+      toCore S.Not = C.Not
 
 {-
 - desugaring pattern matching
@@ -78,7 +82,7 @@ data GenMatchLn = GenMatchLn [(Id, S.Pattern)] S.Computation
 desugarCase :: S.Computation -> C.Computation
 desugarCase c@(S.Case e ps) = let x = freshName (S.freeVars c)
                                   cm = toCoreMatch $ toIR ps x
-                               in C.Let x (C.Ret (desugarExpr e)) cm
+                               in C.Let x (C.Ret (desugar e)) cm
 desugarCase _ = error "arg mismatch"
 
 toIR :: [(S.Pattern, S.Computation)] -> Id -> GenMatch

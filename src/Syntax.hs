@@ -10,7 +10,7 @@ import Text.PrettyPrint
 import qualified Data.Map as Map
 import Type
 import Common
-import qualified Data.Set as Set
+import qualified Data.Set.Monad as Set
 
 data Expr
   = Var Id
