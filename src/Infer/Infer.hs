@@ -82,7 +82,16 @@ instance Collect Expr PureType where
     -- Cstr-Var & Cstr PolyVar
     Var x -> case (Map.lookup x mctx, Map.lookup x pctx) of
                (Just pt, Nothing) -> return (Res Set.empty pt Set.empty)
-               (Nothing, Just (Forall f a cons)) -> return (Res f a cons)
+               -- See: Inferring Algeff p. 19
+               (Nothing, Just (Forall f a cons)) -> do
+                 -- rename bound params F and obtain a fresh copy as each use
+                 nn's <- forM (Set.toList f) $ \n -> do 
+                           n' <- getFreshName
+                           return (n, n')
+                 let s = Map.fromList nn's
+                     f' = Set.fromList (snd <$> nn's)
+                     a' = apply s a
+                 return (Res f' a' cons)
                (Nothing, Nothing) -> throwError $ "undefined variable: " ++ show x
                _ -> error "internal error: mctx & pctx should be disjoint"
     -- literals
@@ -144,6 +153,7 @@ instance Collect Computation DirtyType where
       return (Res (Set.insert d f) (DirtyType a dv) cons)
     -- Cstr-App
     App e1 e2 -> do
+      tell $ "\n\nin app: " ++ show _c ++ "\n"
       Res f1 a1 cons1 <- collectConstraints ctx e1
       Res f2 a2 cons2 <- collectConstraints ctx e2
       _al <- getFreshName
@@ -153,6 +163,7 @@ instance Collect Computation DirtyType where
           resultTy = DirtyType al dv
           cons' = Set.insert (CPureTLE a1 (TFunc a2 resultTy)) cons1 \/ cons2 
           f' = f1 \/ f2 \/ Set.fromList [_al, d]
+      tell $ show (Res f' resultTy cons')
       return (Res f' resultTy cons')
     -- Cstr-IfThenElse
     If e cm1 cm2 -> do
@@ -203,8 +214,16 @@ instance Collect Computation DirtyType where
           cons' = Set.insert (CPureTLE a typeBottom) cons
           f' = f \/ Set.fromList [_al, d]
       return (Res f' resultTy cons')
+    -- CStr-LetVar
+    Let x e cm -> do
+      tt@(Res f1 a cons1) <- collectConstraints ctx e
+      tell $ "\n\nin let:\n"
+      tell $ show tt
+      let ctx' = Context mctx (pctx ?: (x, Forall f1 a cons1))
+      Res f2 c cons2 <- collectConstraints ctx' cm
+      return (Res f2 c cons2)
     -- Cstr-Let
-    Let x c1 c2 -> do
+    Do x c1 c2 -> do
       Res f1 (DirtyType a d1) cons1 <- collectConstraints ctx c1
       _al <- getFreshName
       d <- getFreshName
@@ -220,7 +239,7 @@ instance Collect Computation DirtyType where
           f' = f1 \/ f2 \/ Set.fromList [_al, d]
       return (Res f' resultTy cons')
     -- Cstr-LetRec
-    LetRec f x c1 c2 -> do
+    DoRec f x c1 c2 -> do
       _al1 <- getFreshName
       _al2 <- getFreshName
       d <- getFreshName
@@ -260,6 +279,6 @@ runInferIO e signature = do
       Right r -> putStrLn $ "the infered result is: " ++ show r
       Left err -> putStrLn $ "error in typechecking: " ++ err
     putStrLn "-------------------"
-    putStrLn $ "log: " ++ info
+    yellow $ "log: " ++ info
     return res
 

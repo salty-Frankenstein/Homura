@@ -2,7 +2,12 @@
 - the frontend language syntax
 -}
 {-# LANGUAGE OverloadedStrings #-}
-module Syntax where
+module Syntax
+  ( Expr(..), ADT(..), Arith(..), BOp(..), UOp(..)
+  , Computation(..), Lit(..), OpCase(..), Pattern(..)
+  , AST(..), Decl(..), TypeTerm(..)
+  , traverseOcs
+  ) where
 
 import Prelude hiding ((<>))
 import qualified Data.Text as T
@@ -53,8 +58,9 @@ data Computation
   | OpCall OpTag Expr
   | WithHandle Expr Computation
   | Absurd DirtyType Expr
-  | Let Id Computation Computation
-  | LetRec Id Id Computation Computation
+  | Let Id Expr Computation
+  | Do Id Computation Computation
+  | DoRec Id Id Computation Computation
   | Case Expr [(Pattern, Computation)]
 
 data Pattern
@@ -143,8 +149,9 @@ instance AST Computation where
   freeVars (OpCall (OpTag _) e)     = freeVars e
   freeVars (WithHandle h c)         = freeVars h \/ freeVars c
   freeVars (Absurd _ e)             = freeVars e
-  freeVars (Let x c1 c2)            = freeVars c1 \/ (freeVars c2 \\ Set.singleton x)
-  freeVars (LetRec f x c1 c2)       = freeVars c1 \/ (freeVars c2 \\ Set.fromList [f, x])
+  freeVars (Let x e c)              = freeVars e \/ (freeVars c \\ Set.singleton x)
+  freeVars (Do x c1 c2)             = freeVars c1 \/ (freeVars c2 \\ Set.singleton x)
+  freeVars (DoRec f x c1 c2)        = freeVars c1 \/ (freeVars c2 \\ Set.fromList [f, x])
   freeVars (Case e ps) = freeVars e \/ Set.unions (freePat <$> ps)
     where
       freePat :: (Pattern, Computation) -> VarSet
@@ -227,8 +234,9 @@ instance Pretty Computation where
     <> parens (pp x)
   ppr p (WithHandle h c) = parensIf p $ "with" <+> ppr 1 h <+> "handle" <+> ppr 1 c
   ppr p (Absurd _ e) = parensIf p $ "absurd" <+> ppr 1 e
-  ppr p (Let x c1 c2) = parensIf p $ "let" <+> text' x <+> text "<-" <+> ppr 1 c1 <+> text "in" <+> ppr 1 c2  
-  ppr p (LetRec f x c1 c2) = parensIf p $ "let" <+> text' f <+> text' x <+> "<-" <+> pp c1 <+> text "in" <+> ppr 1 c2  
+  ppr p (Let x e c) = parensIf p $ "let" <+> text' x <+> "=" <+> ppr 1 e <+> "in" <+> ppr 1 c
+  ppr p (Do x c1 c2) = parensIf p $ "do" <+> text' x <+> "<-" <+> ppr 1 c1 <+> "in" <+> ppr 1 c2  
+  ppr p (DoRec f x c1 c2) = parensIf p $ "do" <+> text' f <+> text' x <+> "<-" <+> pp c1 <+> text "in" <+> ppr 1 c2  
   ppr p (Case e ps) = parensIf p $ "case" <+> ppr 0 e <+> "of" <+> lbrace 
     <+> hsep ((\(p, e) -> ppr 0 p <+> "->" <+> ppr 0 e <> ";") <$> ps) <+> rbrace
 

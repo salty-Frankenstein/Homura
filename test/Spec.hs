@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 import qualified Syntax as S
 import qualified Core as C
+import Common
 import Desugar
 import Lib.EDSL
 import Lib.Arith
@@ -52,18 +53,18 @@ testCaseinput = [
   ]
 
 choose = fun "x" .> ret (fun "y" .>
-    let' "b" ("decide" <~ unit)
+    do' "b" ("decide" <~ unit)
       (if' "b" (ret "x") (ret "y")))
 
-chooseDiff = let' "x1" (binop choose (i 15) (i 30))
-              (let' "x2" (binop choose (i 5) (i 10))
-              (let' "diff" (binop sub "x1" "x2")
+chooseDiff = do' "x1" (binop choose (i 15) (i 30))
+              (do' "x2" (binop choose (i 5) (i 10))
+              (do' "diff" (binop sub "x1" "x2")
               (ret "diff")))
 pickMax = handler "x" (ret "x")
                   (opcase "decide" "_" "k" 
-                    (let' "xt" ("k" <| true)
-                    (let' "xf" ("k" <| false)
-                    (let' "max" (binop max' "xt" "xf")
+                    (do' "xt" ("k" <| true)
+                    (do' "xf" ("k" <| false)
+                    (do' "max" (binop max' "xt" "xf")
                     (ret "max")))) 
                   nil)
 
@@ -78,18 +79,25 @@ cres = C.VRet . C.Lit . C.LInt
 -- t :: InferM (InferRes PureType)
 -- t = collectConstraints (Context Map.empty Map.empty) pickTrue
 
-testInfer :: (Show r, Collect a r) => a -> Signature -> IO ()
+testInfer :: (Rename r, Substitutable r, Show r, Show a, Collect a r) 
+          => a -> Signature -> IO ()
 testInfer x s = do
+  putStrLn "==========================="
+  putStrLn $ "infering term: " ++ show x
   res <- runInferIO x s
   putStrLn "----------\nunification:"
   case res of
-    Right (Res _ _ c) -> case runUnify c of
-      Left s -> putStrLn $ "error in unification"
+    Right (Res _ a c) -> case runUnify c of
+      Left s -> do 
+        red $ "error in unification: "
+        red s
       Right (UnifyState s c _) -> do
-        putStrLn $ "the result susbtution is: " ++ show s
+        putStrLn $ "the result substitution is: " ++ show s
         putStrLn $ "the result constraint set is: " ++ show c
+        putStrLn $ "======================="
+        let t = normalize $ s ?$ a
+        green $ "result: " ++ show x ++ " : " ++ show t ++ "\ESC[0m"
     _ -> return ()
-
 
 main :: IO ()
 main = do
@@ -109,6 +117,15 @@ main = do
 
   let decideSig = Map.fromList [(OpTag "decide", (typeTop, typeBool))]
   testInfer pickTrue decideSig
+  testInfer (unwrapE $ fun "f" .> ret (fun "x" .> ("f" <| "x"))) Map.empty
+  let poly1 = let' "f" (fun "x" .> ret "x") 
+                (do' "b" ("f" <| true)
+                  (if' "b" ("f" <| i 1) ("f" <| i 2)))
+  let poly2 = let' "const" (fun "y" .> ret (fun "x" .> ret "y")) 
+                (let' "c1" (fun "x" .> do' "f" ("const" <| i 1) ("f" <| "x"))
+                  (if' true ("c1" <| true) ("c1" <| i 1)))
+  testInfer poly1 Map.empty
+  testInfer poly2 Map.empty
   -- testInfer chooseDiff decideSig
 
   return ()

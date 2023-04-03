@@ -21,8 +21,9 @@ instance Desugar S.Computation C.Computation where
     S.OpCall op e -> C.OpCall op (desugar e) "y" (C.Ret (C.Var "y"))
     S.WithHandle e c -> C.WithHandle (desugar e) (desugar c)
     S.Absurd d e -> C.Absurd d (desugar e)
-    S.Let x c1 c2 -> C.Let x (desugar c1) (desugar c2)
-    S.LetRec f x c1 c2 -> C.LetRec f x (desugar c1) (desugar c2)
+    S.Let x e c -> C.Let x (desugar e) (desugar c)
+    S.Do x c1 c2 -> C.Do x (desugar c1) (desugar c2)
+    S.DoRec f x c1 c2 -> C.DoRec f x (desugar c1) (desugar c2)
     cs@S.Case{} -> desugarCase cs
 
 instance Desugar S.Expr C.Expr where
@@ -82,7 +83,7 @@ data GenMatchLn = GenMatchLn [(Id, S.Pattern)] S.Computation
 desugarCase :: S.Computation -> C.Computation
 desugarCase c@(S.Case e ps) = let x = freshName (S.freeVars c)
                                   cm = toCoreMatch $ toIR ps x
-                               in C.Let x (C.Ret (desugar e)) cm
+                               in C.Do x (C.Ret (desugar e)) cm
 desugarCase _ = error "arg mismatch"
 
 toIR :: [(S.Pattern, S.Computation)] -> Id -> GenMatch
@@ -111,7 +112,7 @@ toCoreMatch x = let x' = step1 x
       in case p of
         S.PWild -> undefined -- TODO
         S.PCons{} -> GenMatchLn ((a, p):ps') e'
-        S.PVar x -> GenMatchLn ps' (S.Let x (S.Ret (S.Var a)) e')
+        S.PVar x -> GenMatchLn ps' (S.Do x (S.Ret (S.Var a)) e')
     -- step2: select one of the tests in the first clause
     -- the choice is heuristic, here I just take the first instead
     step2 :: GenMatch -> Either C.Computation (Id, S.Pattern)

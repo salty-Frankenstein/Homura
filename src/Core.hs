@@ -1,5 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
-module Core where
+module Core 
+  ( Expr(..), ADT(..), Arith(..), BOp(..), UOp(..)
+  , Computation(..), Lit(..), OpCase(..), Result(..)
+  , exec'
+  ) where
+
 import Prelude hiding ((<>))
 import qualified Data.Text as T
 import qualified Data.Set.Monad as Set
@@ -54,8 +59,9 @@ data Computation
   | OpCall OpTag Expr Id Computation
   | WithHandle Expr Computation
   | Absurd DirtyType Expr
-  | Let Id Computation Computation
-  | LetRec Id Id Computation Computation
+  | Let Id Expr Computation
+  | Do Id Computation Computation
+  | DoRec Id Id Computation Computation
   | CaseSum Expr Id Computation Id Computation
   | CaseProd Expr Id Id Computation
   | Case Expr Id [Id] Computation Computation
@@ -122,8 +128,9 @@ instance Pretty Computation where
     <> parens (pp x <> semi <+> text' y <> char '.' <+> pp c)
   ppr p (WithHandle h c) = parensIf p $ "with" <+> ppr 1 h <+> "handle" <+> ppr 1 c
   ppr p (Absurd _ e) = parensIf p $ "absurd" <+> ppr 1 e
-  ppr p (Let x c1 c2) = parensIf p $ "let" <+> text' x <+> text "<-" <+> ppr 1 c1 <+> text "in" <+> ppr 1 c2
-  ppr p (LetRec f x c1 c2) = parensIf p $ "let" <+> text' f <+> text' x <+> "<-" <+> pp c1 <+> text "in" <+> ppr 1 c2
+  ppr p (Let x e c) = parensIf p $ "let" <+> text' x <+> "=" <+> ppr 1 e <+> "in" <+> ppr 1 c
+  ppr p (Do x c1 c2) = parensIf p $ "do" <+> text' x <+> "<-" <+> ppr 1 c1 <+> "in" <+> ppr 1 c2
+  ppr p (DoRec f x c1 c2) = parensIf p $ "do" <+> text' f <+> text' x <+> "<-" <+> pp c1 <+> "in" <+> ppr 1 c2
   ppr p (CaseSum e a l b r) = parensIf p $ "case-+" <+> ppr 0 e <+> "of" <+> lbrace
     <+> "Inl" <+> text' a <+> "->" <+> ppr 0 l
     <+> "Inr" <+> text' b <+> "->" <+> ppr 0 r  <+> rbrace
@@ -229,8 +236,9 @@ instance AST Computation where
   freeVars (OpCall (OpTag _) e y c) = freeVars e \/ (freeVars c \\ Set.singleton y)
   freeVars (WithHandle h c)         = freeVars h \/ freeVars c
   freeVars (Absurd _ e)             = freeVars e
-  freeVars (Let x c1 c2)            = freeVars c1 \/ (freeVars c2 \\ Set.singleton x)
-  freeVars (LetRec f x c1 c2)       = freeVars c1 \/ (freeVars c2 \\ Set.fromList [f, x])
+  freeVars (Let x e c)              = freeVars c \/ (freeVars e \\ Set.singleton x)
+  freeVars (Do x c1 c2)             = freeVars c1 \/ (freeVars c2 \\ Set.singleton x)
+  freeVars (DoRec f x c1 c2)        = freeVars c1 \/ (freeVars c2 \\ Set.fromList [f, x])
   freeVars (CaseSum e a l b r)      = freeVars e \/ (freeVars l \\ Set.singleton a) \/ (freeVars r \\ Set.singleton b)
   freeVars (CaseProd e a b r)       = freeVars e \/ (freeVars r \\ Set.fromList [a, b])
   freeVars (Case e _ vs c1 c2)   = freeVars e \/ (freeVars c1 \\ Set.fromList vs) \/ freeVars c2
@@ -241,8 +249,9 @@ instance AST Computation where
   binders (OpCall (OpTag _) e y c) = binders e \/ (binders c \/ Set.singleton y)
   binders (WithHandle h c)         = binders h \/ binders c
   binders (Absurd _ e)             = binders e
-  binders (Let x c1 c2)            = binders c1 \/ (binders c2 \/ Set.singleton x)
-  binders (LetRec f x c1 c2)       = binders c1 \/ (binders c2 \/ Set.fromList [f, x])
+  binders (Let x e c)              = binders c \/ (binders e \/ Set.singleton x)
+  binders (Do x c1 c2)             = binders c1 \/ (binders c2 \/ Set.singleton x)
+  binders (DoRec f x c1 c2)        = binders c1 \/ (binders c2 \/ Set.fromList [f, x])
   binders (CaseSum e a l b r)      = binders e \/ binders l \/ binders r \/ Set.fromList [a, b]
   binders (CaseProd e a b r)       = binders e \/ binders r \/ Set.fromList [a, b]
   binders (Case e _ vs c1 c2)      = binders e \/ binders c1 \/ binders c2 \/ Set.fromList vs
@@ -255,8 +264,9 @@ instance AST Computation where
       OpCall op e y c   -> OpCall op (rename' e) y (renameWith (Set.insert y bindVars) c)
       WithHandle h c    -> WithHandle (rename' h) (rename' c)
       Absurd t e        -> Absurd t (rename' e)
-      Let x c1 c2       -> Let x (rename' c1) (renameWith (Set.insert x bindVars) c2)
-      LetRec f x c1 c2  -> LetRec f x (rename' c1) (renameWith (bindVars \/ Set.fromList [f, x]) c2)
+      Let x e c         -> Let x (rename' e) (renameWith (Set.insert x bindVars) c)
+      Do x c1 c2        -> Do x (rename' c1) (renameWith (Set.insert x bindVars) c2)
+      DoRec f x c1 c2   -> DoRec f x (rename' c1) (renameWith (bindVars \/ Set.fromList [f, x]) c2)
       CaseSum e a l b r -> CaseSum (rename' e) a (renameWith (Set.insert a bindVars) l)
                                                b (renameWith (Set.insert b bindVars) r)
       CaseProd e a b r  -> CaseProd (rename' e) a b (renameWith (bindVars \/ Set.fromList [a, b]) r)
@@ -275,12 +285,14 @@ instance AST Computation where
                             in OpCall op (subst' e) z (subst' (rename Set.empty (y, z) c))
       WithHandle h c    -> WithHandle (subst' h) (subst' c)
       Absurd t e        -> Absurd t (subst' e)
+      Let y e c         -> let z = freshName (Set.insert x (freeVars n) \/ freeVars c \/ binders c \/ freeVars e)
+                            in Let z (subst' e) (subst' (rename Set.empty (y, z) c))
       -- TODO: Is the freeVars c1` necessary?
-      Let y c1 c2       -> let z = freshName (Set.insert x (freeVars n) \/ freeVars c2 \/ binders c2 \/ freeVars c1)
-                            in Let z (subst' c1) (subst' (rename Set.empty (y, z) c2))
-      LetRec f y c1 c2  -> let fvs = Set.insert x (freeVars n) \/ freeVars c2 \/ binders c2 \/ freeVars c1
+      Do y c1 c2        -> let z = freshName (Set.insert x (freeVars n) \/ freeVars c2 \/ binders c2 \/ freeVars c1)
+                            in Do z (subst' c1) (subst' (rename Set.empty (y, z) c2))
+      DoRec f y c1 c2   -> let fvs = Set.insert x (freeVars n) \/ freeVars c2 \/ binders c2 \/ freeVars c1
                                [a, b] = take 2 (freshNames fvs)
-                            in LetRec a b (subst' c1)
+                            in DoRec a b (subst' c1)
                                           (subst' (rename Set.empty (f, a) . rename Set.empty (y, b) $ c2))
       CaseSum e a l b r -> let a' = freshName (Set.insert x (freeVars n) \/ freeVars l \/ binders l)
                                b' = freshName (Set.insert x (freeVars n) \/ freeVars r \/ binders r)
@@ -310,9 +322,10 @@ exec' Absurd{} = error "never execute absurd"
 
 exec' (App (Abs x c) e) = exec' (substitute (x, e) c)
 exec' App{} = error "not a function"
-exec' (Let x c1 c2) = case exec' c1 of
+exec' (Let x e c) = exec' (substitute (x, eval e) c)
+exec' (Do x c1 c2) = case exec' c1 of
                             VRet e -> exec' (substitute (x, e) c2)
-                            VOpCall op e y c -> VOpCall op e y (Let x c c2)
+                            VOpCall op e y c -> VOpCall op e y (Do x c c2)
 exec' (WithHandle h@(Handler xv a cv ocs) oc) =
     case exec' oc of
       VRet e -> exec' (substitute (xv, e) cv)
@@ -326,7 +339,7 @@ exec' (WithHandle h@(Handler xv a cv ocs) oc) =
     lookupCase op (OpCase op' x k c ocs) | op == op' = Just (x, k, c)
                                          | otherwise = lookupCase op ocs
 exec' WithHandle{} = error "not a handler"
-exec' (LetRec f x c1 c2) = undefined
+exec' (DoRec f x c1 c2) = undefined
 exec' (CaseSum e a l b r) = case eval e of
                               ADT (Inl v) -> exec' (substitute (a, v) l)
                               ADT (Inr v) -> exec' (substitute (b, v) r)

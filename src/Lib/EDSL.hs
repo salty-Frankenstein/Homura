@@ -37,7 +37,7 @@ p3 x (Pattern' y1) (Pattern' y2) (Pattern' y3) = Pattern' $ PCons x [y1, y2, y3]
 ret = Ret . unwrapE
 (Expr' a) <| (Expr' b) = App a b
 if' (Expr' a) = If a 
-c1 >-> _c2 = Let "_" c1 _c2
+c1 >-> _c2 = Do "_" c1 _c2
 (OpTag' x) <~ (Expr' y) = OpCall x y
 h |=> c = WithHandle h c 
 
@@ -48,7 +48,8 @@ match :: Expr' -> Writer [(Pattern, Computation)] a -> Computation
 match (Expr' e) x = let res = execWriter x
                      in Case e res
 
-let' = Let
+do' = Do
+let' x e c = Let x (unwrapE e) c
 
 -- expressions
 fun = id

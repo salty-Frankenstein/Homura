@@ -94,6 +94,7 @@ instance Substitutable ConstraintSet where
 
 -- TODO: check if it keeps reflexive 
 -- the closure operator for pure types
+-- TODO: rewrite this
 (\+/) :: UnifiedConsSet -> UnifiedCons -> UnifiedConsSet
 (UnifiedConsSet _p d) \+/ UnifiedCons a1 a2 = UnifiedConsSet p' d
   where
@@ -111,7 +112,7 @@ instance Substitutable ConstraintSet where
 
 -- the equivalence class of same shape
 equiv :: Set.Set UnifiedCons -> Id -> VarSet
-equiv c a = [y | UnifiedCons x y <- c, x == a]
+equiv c a = a ?:: [y | UnifiedCons x y <- c, x == a]
          \/ [x | UnifiedCons x y <- c, y == a]
 
 data UnifyState = UnifyState
@@ -179,6 +180,8 @@ unify q'
             composeWith s'
             modifyConsSet (?\ c')
             -- TODO: check this
+            -- let tt = (CPureTLE (s' ?$ _a) _A ?:: s' ?$ toConsSet c' \/ s' ?$ q)
+            -- throwError $ show tt
             unify (CPureTLE (s' ?$ _a) _A ?:: s' ?$ toConsSet c' \/ s' ?$ q)
         -- A <= a
         (_A, _a@(TVar (TV a))) -> do
