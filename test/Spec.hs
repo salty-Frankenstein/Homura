@@ -11,17 +11,18 @@ import Infer.Unify
 import Type
 import qualified Data.Map as Map
 
+tv = TVar . TV
 decls = [
     S.DataDecl "Expr" [
-      S.TypeTerm "Var" ["Id"]
-    , S.TypeTerm "Abs" ["Id", "Computation"]
-    , S.TypeTerm "Handler" ["Id", "PureTerm", "Computation", "OpCase"]
-    , S.TypeTerm "Arith" ["Arith"]
-    , S.TypeTerm "ADT" ["ADT"]
+      S.TypeTerm "Var" [tv "Id"]
+    , S.TypeTerm "Abs" $ map tv ["Id", "Computation"]
+    , S.TypeTerm "Handler" $ map tv ["Id", "PureTerm", "Computation", "OpCase"]
+    , S.TypeTerm "Arith" [tv "Arith"]
+    , S.TypeTerm "ADT" [tv "ADT"]
     ]
   , S.DataDecl "Lit" [
-      S.TypeTerm "LInt" ["Int"]
-    , S.TypeTerm "LBool" ["Bool"]
+      S.TypeTerm "LInt" [typeInt]
+    , S.TypeTerm "LBool" [typeBool]
     , S.TypeTerm "LUnit" []
     ]
   ]
@@ -30,6 +31,16 @@ c = match (i 1) $ do
       p2 "Add" (p1 "LInt" __) __ ~> ret (i 2)
       __ ~> ret (i 3)
   
+testCaseDecls = 
+  [ S.DataDecl "Expr"
+      [ S.TypeTerm "Zero" []
+      , S.TypeTerm "Succ" [TCon "Expr"]
+      , S.TypeTerm "Add" [TCon "Expr", TCon "Expr"]
+      , S.TypeTerm "Mul" [TCon "Expr", TCon "Expr"]]
+  ]
+testCaseSig = let (_, cs, os) = S.nameResolution testCaseDecls
+               in Signature cs os
+
 testCase e = match e $ do 
                p2 "Add" (p0 "Zero") (p0 "Zero") ~> ret (i 1)
                p2 "Mul" (p0 "Zero") "x" ~> ret (i 2)
@@ -87,16 +98,17 @@ testInfer x s = do
   res <- runInferIO x s
   putStrLn "----------\nunification:"
   case res of
-    Right (Res _ a c) -> case runUnify c of
-      Left s -> do 
-        red $ "error in unification: "
-        red s
-      Right (UnifyState s c _) -> do
-        putStrLn $ "the result substitution is: " ++ show s
-        putStrLn $ "the result constraint set is: " ++ show c
-        putStrLn $ "======================="
-        let t = normalize $ s ?$ a
-        green $ "result: " ++ show x ++ " : " ++ show t ++ "\ESC[0m"
+    Right (Res _ a c) -> let (res, info) = runUnify c in do
+      case res of
+        Left s -> do 
+          red $ "error in unification: " ++ s
+        Right (UnifyState s c _) -> do
+          putStrLn $ "the result substitution is: " ++ show s
+          putStrLn $ "the result constraint set is: " ++ show c
+          putStrLn $ "======================="
+          let t = normalize $ s ?$ a
+          green $ "result: " ++ show x ++ " : " ++ show t ++ "\ESC[0m"
+      yellow $ "unify log: " ++ info
     _ -> return ()
 
 main :: IO ()
@@ -115,17 +127,19 @@ main = do
       test3 = TestCase (assertEqual "test3" res2 (cres 25))
   _ <- runTestTT (TestList $ test1 ++ [test2, test3])
 
-  let decideSig = Map.fromList [(OpTag "decide", (typeTop, typeBool))]
+  let (_, cs, os) = S.nameResolution [S.EffectDecl "dummy" [S.OpDecl (OpTag "decide") typeTop typeBool]]
+      decideSig = Signature cs os
   testInfer pickTrue decideSig
-  testInfer (unwrapE $ fun "f" .> ret (fun "x" .> ("f" <| "x"))) Map.empty
+  testInfer (unwrapE $ fun "f" .> ret (fun "x" .> ("f" <| "x"))) emptySig
   let poly1 = let' "f" (fun "x" .> ret "x") 
                 (do' "b" ("f" <| true)
                   (if' "b" ("f" <| i 1) ("f" <| i 2)))
   let poly2 = let' "const" (fun "y" .> ret (fun "x" .> ret "y")) 
                 (let' "c1" (fun "x" .> do' "f" ("const" <| i 1) ("f" <| "x"))
                   (if' true ("c1" <| true) ("c1" <| i 1)))
-  testInfer poly1 Map.empty
-  testInfer poly2 Map.empty
-  -- testInfer chooseDiff decideSig
-
+  testInfer poly1 emptySig
+  testInfer poly2 emptySig
+  testInfer (unwrapE choose) decideSig
+  testInfer chooseDiff decideSig
+  testInfer (testCase (head testCaseinput)) testCaseSig
   return ()

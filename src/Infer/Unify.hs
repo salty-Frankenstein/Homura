@@ -7,6 +7,7 @@ import qualified Data.Text as T
 import qualified Data.Set.Monad as Set
 import qualified Data.Map as Map
 import Control.Monad.State
+import Control.Monad.Writer
 import Control.Monad.Except
 import Common
 import Type
@@ -53,8 +54,8 @@ instance Substitutable DirtyType where
   free (DirtyType a d) = free a \/ free d
 
 instance Substitutable Dirt where
-  Substitution _ s ?$ Dirt ops dv@(DV d) = Dirt (ops \/ ops') d'
-    where Dirt ops' d' = Map.findWithDefault (Dirt Set.empty dv) d s
+  Substitution _ s ?$ Dirt ops (DV d) = Dirt (ops \/ ops') d'
+    where Dirt ops' d' = Map.findWithDefault (dirtVar d) d s
 
   free (Dirt _ (DV d)) = Set.singleton d
 
@@ -78,8 +79,8 @@ instance Show UnifiedCons where
 
 toConsSet :: UnifiedConsSet -> ConstraintSet
 toConsSet (UnifiedConsSet p d) = 
-     Set.map (\(UnifiedCons a b) -> CPureTLE (TVar (TV a)) (TVar (TV b))) p
-  \/ Set.map (\(UnifiedCons a b) -> CDirtLE (Dirt Set.empty (DV a)) (Dirt Set.empty (DV b))) d
+     Set.map (\(UnifiedCons a b) -> CPureTLE (typeVar a) (typeVar b)) p
+  \/ Set.map (\(UnifiedCons a b) -> CDirtLE (dirtVar a) (dirtVar b)) d
 
 instance Substitutable Constraint where
   subst ?$ CPureTLE a b = CPureTLE (subst ?$ a) (subst ?$ b)
@@ -120,8 +121,10 @@ data UnifyState = UnifyState
                     , consSet :: UnifiedConsSet -- the constraints already unified
                     , names   :: [Id] }         -- stream of fresh streams
 
-class (MonadState UnifyState m
-     , MonadError String m) => UnifyMonad m where
+class ( MonadState UnifyState m
+      , MonadWriter String m
+      , MonadError String m
+      ) => UnifyMonad m where
   -- compose the current substitution with a given one
   composeWith :: Substitution -> m ()
   composeWith s' = modify (\(UnifyState s c n) -> UnifyState (compose s' s) c n)
@@ -202,27 +205,31 @@ unify q'
         -- TODO: more
         _ -> throwError $ "cannot unify " ++ show a ++ " and " ++ show a'
     CDirtyTLE (DirtyType a d) (DirtyType a' d') -> unify (CPureTLE a a' ?:: CDirtLE d d' ?:: q)
-    CDirtLE (Dirt o (DV d1)) (Dirt o' (DV d2)) -> 
+    CDirtLE (Dirt o (DV d1)) (Dirt o' (DV d2)) ->
       if o == o' then modifyConsSet (\*/ UnifiedCons d1 d2) >> unify q
       else do
+        -- tell $ "\nunifying: " ++ show h ++ "\n"
         c <- gets $ dirtCons . consSet
         d1' <- getFreshName
         d2' <- getFreshName
         let s1 = fromDirtMap [(d1, Dirt (o' \\ o) (DV d1')) | not (o' `Set.isSubsetOf` o)]
-            s2 = fromDirtMap [(d2, Dirt (o' \\ o) (DV d2')) | not (o `Set.isSubsetOf` o')]
+            s2 = fromDirtMap [(d2, Dirt (o \\ o') (DV d2')) | not (o `Set.isSubsetOf` o')]
             s' = compose s1 s2
             d1's = equiv c d1
             d2's = equiv c d2
             c' = fromDirtSet $ [p | p@(UnifiedCons d d') <- c, d `elem` d1's, d' `elem` d1's]
                             \/ [p | p@(UnifiedCons d d') <- c, d `elem` d2's, d' `elem` d2's]
+        -- tell $ show s1 ++ "\n"
+        -- tell $ show s2 ++ "\n"
         composeWith s'
         modifyConsSet (?\ c')
         unify (s' ?$ toConsSet c' \/ s' ?$ q)
 
 -- instantiate
-type UnifyM = StateT UnifyState (Except String)
+type UnifyM = StateT UnifyState (ExceptT String (Writer String))
 instance UnifyMonad UnifyM
 
-runUnify :: Set.Set Constraint -> Either String UnifyState
-runUnify q = runExcept (execStateT (unify q) 
-                          (UnifyState (fromPureMap []) emptyUniConsSet (map (T.cons '_') letters)))
+runUnify :: Set.Set Constraint -> (Either String UnifyState, String)
+runUnify q = runWriter $ runExceptT $ execStateT (unify q)
+               (UnifyState (fromPureMap []) emptyUniConsSet (map (T.cons '_') letters))
+

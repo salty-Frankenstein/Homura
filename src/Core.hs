@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Core 
-  ( Expr(..), ADT(..), Arith(..), BOp(..), UOp(..)
+  ( Expr(..), Arith(..), BOp(..), UOp(..)
   , Computation(..), Lit(..), OpCase(..), Result(..)
   , exec'
   ) where
@@ -20,18 +20,7 @@ data Expr
   | Handler Id PureType Computation OpCase
   -- builtin arithmetrics
   | Arith Arith
-  | ADT ADT
-  deriving Eq
-
--- algebraic data types
--- TODO: remove this?
-data ADT
-  = Inl Expr
-  | Inr Expr
-  | Prod Expr Expr
-  | Cons Id [Expr]
-  | Fold Expr
-  | Unfold Expr
+  | Cons ConsName [Expr]
   deriving Eq
 
 -- TODO: Add more
@@ -62,9 +51,7 @@ data Computation
   | Let Id Expr Computation
   | Do Id Computation Computation
   | DoRec Id Id Computation Computation
-  | CaseSum Expr Id Computation Id Computation
-  | CaseProd Expr Id Id Computation
-  | Case Expr Id [Id] Computation Computation
+  | Case Expr ConsName [Id] Computation Computation
   deriving Eq
 
 -- the result of evaluation
@@ -104,13 +91,7 @@ instance Pretty Expr where
                  case uop of
                    Neg -> text "-" <+> pp v
                    Not -> text "!" <+> pp v
-  ppr p (ADT t) = parensIf p $ case t of
-    Inl x -> "Inl" <+> ppr 1 x
-    Inr x -> "Inr" <+> ppr 1 x
-    Prod x1 x2 -> char '<' <> ppr 0 x1 <> comma <+> ppr 0 x2 <> char '>'
-    Cons c es -> text' c <+> parens (hsep (ppr 0 <$> es))
-    Fold x -> "fold" <+> ppr 1 x
-    Unfold x -> "unfold" <+> ppr 1 x
+  ppr p (Cons (ConsName c) es) = parensIf p $ text' c <+> parens (hsep (ppr 0 <$> es))
 
 instance Pretty OpCase where
   ppr _ Nil{} = empty
@@ -131,12 +112,7 @@ instance Pretty Computation where
   ppr p (Let x e c) = parensIf p $ "let" <+> text' x <+> "=" <+> ppr 1 e <+> "in" <+> ppr 1 c
   ppr p (Do x c1 c2) = parensIf p $ "do" <+> text' x <+> "<-" <+> ppr 1 c1 <+> "in" <+> ppr 1 c2
   ppr p (DoRec f x c1 c2) = parensIf p $ "do" <+> text' f <+> text' x <+> "<-" <+> pp c1 <+> "in" <+> ppr 1 c2
-  ppr p (CaseSum e a l b r) = parensIf p $ "case-+" <+> ppr 0 e <+> "of" <+> lbrace
-    <+> "Inl" <+> text' a <+> "->" <+> ppr 0 l
-    <+> "Inr" <+> text' b <+> "->" <+> ppr 0 r  <+> rbrace
-  ppr p (CaseProd e a b res) = parensIf p $ "case-*" <+> ppr 0 e <+> "of" <+> lbrace
-    <+> "<" <> text' a <> comma <+> text' b <> ">" <+> "->" <+> ppr 0 res <+> rbrace
-  ppr p (Case e cons vs c1 c2) = parensIf p $ "case" <+> ppr 0 e <+> "of" <+> lbrace
+  ppr p (Case e (ConsName cons) vs c1 c2) = parensIf p $ "case" <+> ppr 0 e <+> "of" <+> lbrace
     <+> text' cons <+> hsep (text' <$> vs) <+> "->" <+> ppr 0 c1
     <+> ";" <+> "_ ->" <+> ppr 0 c2 <+> rbrace
 
@@ -148,24 +124,6 @@ instance Show Computation where
 instance Show Result where
   show (VRet e) = render (pp (Ret e))
   show (VOpCall op x y c) = render (pp (OpCall op x y c))
-
-afold :: (Expr -> VarSet) -> ADT -> VarSet
-afold f t = case t of
-  Inl e -> f e
-  Inr e -> f e
-  Prod e1 e2 -> f e1 \/ f e2
-  Cons _ es -> Set.unions $ f <$> es
-  Fold e -> f e
-  Unfold e -> f e
-
-amap :: (Expr -> Expr) -> ADT -> ADT
-amap f t = case t of
-  Inl e -> Inl (f e)
-  Inr e -> Inr (f e)
-  Prod e1 e2 -> Prod (f e1) (f e2)
-  Cons c es -> Cons c (f <$> es)
-  Fold e -> Fold (f e)
-  Unfold e -> Unfold (f e)
 
 class AST a where
   freeVars :: a -> VarSet
@@ -181,7 +139,7 @@ instance AST Expr where
   freeVars (Arith (UOp _ e))     = freeVars e
   freeVars (Abs x c)             = freeVars c \\ Set.singleton x
   freeVars (Handler x _ c ocs)   = (freeVars c \\ Set.singleton x) \/ freeVars ocs
-  freeVars (ADT t)               = afold freeVars t
+  freeVars (Cons _ es)           = Set.unions (freeVars <$> es)
 
   binders (Var x)               = Set.empty
   binders Lit{}                 = Set.empty
@@ -189,7 +147,7 @@ instance AST Expr where
   binders (Arith (UOp _ e))     = binders e
   binders (Abs x c)             = binders c \/ Set.singleton x
   binders (Handler x _ c ocs)   = (binders c \/ Set.singleton x) \/ freeVars ocs
-  binders (ADT t)               = afold binders t
+  binders (Cons _ es)           = Set.unions (binders <$> es)
 
   rename bindVars (a, b) (Var x) | Set.notMember x bindVars && x == a = Var b
                                  | otherwise = Var x
@@ -198,7 +156,7 @@ instance AST Expr where
   rename bindVars s (Arith (UOp op e)) = Arith (UOp op (rename bindVars s e))
   rename bindVars s (Abs x c) = Abs x (rename (Set.insert x bindVars) s c)
   rename bindVars s (Handler x a c ocs) = Handler x a (rename (Set.insert x bindVars) s c) (rename bindVars s ocs)
-  rename bindVars s (ADT t) = ADT $ amap (rename bindVars s) t
+  rename bindVars s (Cons c es) = Cons c (rename bindVars s <$> es)
 
   substitute (y, n) (Var x) | x == y = n
                             | otherwise = Var x
@@ -210,7 +168,7 @@ instance AST Expr where
   substitute (x, n) (Handler y a c ocs) = let z = freshName (Set.insert x (freeVars n) \/ freeVars c \/ binders c)
                                            in Handler z a (substitute (x, n) (rename Set.empty (y, z) c))
                                                           (substitute (x, n) ocs)
-  substitute s (ADT t) = ADT $ amap (substitute s) t
+  substitute s (Cons c es) = Cons c (substitute s <$> es)
 
 instance AST OpCase where
   freeVars Nil{} = Set.empty
@@ -239,8 +197,6 @@ instance AST Computation where
   freeVars (Let x e c)              = freeVars c \/ (freeVars e \\ Set.singleton x)
   freeVars (Do x c1 c2)             = freeVars c1 \/ (freeVars c2 \\ Set.singleton x)
   freeVars (DoRec f x c1 c2)        = freeVars c1 \/ (freeVars c2 \\ Set.fromList [f, x])
-  freeVars (CaseSum e a l b r)      = freeVars e \/ (freeVars l \\ Set.singleton a) \/ (freeVars r \\ Set.singleton b)
-  freeVars (CaseProd e a b r)       = freeVars e \/ (freeVars r \\ Set.fromList [a, b])
   freeVars (Case e _ vs c1 c2)   = freeVars e \/ (freeVars c1 \\ Set.fromList vs) \/ freeVars c2
 
   binders (Ret e)                  = binders e
@@ -252,8 +208,6 @@ instance AST Computation where
   binders (Let x e c)              = binders c \/ (binders e \/ Set.singleton x)
   binders (Do x c1 c2)             = binders c1 \/ (binders c2 \/ Set.singleton x)
   binders (DoRec f x c1 c2)        = binders c1 \/ (binders c2 \/ Set.fromList [f, x])
-  binders (CaseSum e a l b r)      = binders e \/ binders l \/ binders r \/ Set.fromList [a, b]
-  binders (CaseProd e a b r)       = binders e \/ binders r \/ Set.fromList [a, b]
   binders (Case e _ vs c1 c2)      = binders e \/ binders c1 \/ binders c2 \/ Set.fromList vs
 
   rename bindVars s cm =
@@ -267,9 +221,6 @@ instance AST Computation where
       Let x e c         -> Let x (rename' e) (renameWith (Set.insert x bindVars) c)
       Do x c1 c2        -> Do x (rename' c1) (renameWith (Set.insert x bindVars) c2)
       DoRec f x c1 c2   -> DoRec f x (rename' c1) (renameWith (bindVars \/ Set.fromList [f, x]) c2)
-      CaseSum e a l b r -> CaseSum (rename' e) a (renameWith (Set.insert a bindVars) l)
-                                               b (renameWith (Set.insert b bindVars) r)
-      CaseProd e a b r  -> CaseProd (rename' e) a b (renameWith (bindVars \/ Set.fromList [a, b]) r)
       Case e c vs c1 c2 -> Case (rename' e) c vs (renameWith (bindVars \/ Set.fromList vs) c1) (rename' c2)
     where
       rename' :: AST a => a -> a
@@ -294,14 +245,6 @@ instance AST Computation where
                                [a, b] = take 2 (freshNames fvs)
                             in DoRec a b (subst' c1)
                                           (subst' (rename Set.empty (f, a) . rename Set.empty (y, b) $ c2))
-      CaseSum e a l b r -> let a' = freshName (Set.insert x (freeVars n) \/ freeVars l \/ binders l)
-                               b' = freshName (Set.insert x (freeVars n) \/ freeVars r \/ binders r)
-                            in CaseSum (subst' e) a' (subst' (rename Set.empty (a, a') l))
-                                                  b' (subst' (rename Set.empty (b, b') r))
-      CaseProd e a b r  -> let fvs = Set.insert x (freeVars n) \/ freeVars r \/ binders r
-                               [a', b'] = take 2 (freshNames fvs)
-                            in CaseProd (subst' e) a' b' (subst' (rename Set.empty (a, a')
-                                                              . rename Set.empty (b, b') $ r))
       Case e c vs c1 c2 -> let fvs = Set.insert x (freeVars n) \/ freeVars c1 \/ binders c1
                                newvars = take (length vs) (freshNames fvs)
                             in Case (subst' e) c newvars (subst' (foldr ($) c1 (rename Set.empty <$> zip vs newvars)))
@@ -340,15 +283,8 @@ exec' (WithHandle h@(Handler xv a cv ocs) oc) =
                                          | otherwise = lookupCase op ocs
 exec' WithHandle{} = error "not a handler"
 exec' (DoRec f x c1 c2) = undefined
-exec' (CaseSum e a l b r) = case eval e of
-                              ADT (Inl v) -> exec' (substitute (a, v) l)
-                              ADT (Inr v) -> exec' (substitute (b, v) r)
-                              _ -> error "pattern mismatch"
-exec' (CaseProd e a b r) = case eval e of
-                             ADT (Prod v1 v2) -> exec' (substitute (a, v1) . substitute (b, v2) $ r)
-                             _ -> error "pattern mismatch"
 exec' (Case e c vs c1 c2) = case eval e of
-                              ADT (Cons c' vs') -> if c == c' 
+                              Cons c' vs' -> if c == c' 
                                 then exec' (foldr ($) c1 (substitute <$> zip vs vs'))
                                     -- error $ "\n debug: " ++ show (Case e c vs c1 c2)
                                 else exec' c2
@@ -372,8 +308,5 @@ eval (Arith a) = Lit res
             UOp Neg (Lit (LInt i)) -> LInt (- i)
             UOp Not (Lit (LBool b)) -> LBool (not b)
             _ -> error $ "mismatch: " ++ show a
-eval (ADT (Unfold x)) = case eval x of
-                          ADT (Fold x') -> x'
-                          _ -> error "unfold a non-fold value, due to a type error"
-eval (ADT t) = ADT $ amap eval t
+eval (Cons c es) = Cons c (eval <$> es)
 eval x = x

@@ -1,12 +1,26 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Common where
 
 import qualified Data.Text as T
 import qualified Data.Set.Monad as Set
 import qualified Data.Map as Map
+import Data.String
 import Control.Monad
 
 type Id = T.Text
 type VarSet = Set.Set Id
+
+newtype OpTag = OpTag T.Text deriving (Eq, Ord)
+newtype ConsName = ConsName Id deriving (Eq, Ord)
+
+instance Show ConsName where
+  show (ConsName x) = T.unpack x
+
+instance IsString ConsName where
+  fromString = ConsName . T.pack
+
+instance Show OpTag where
+  show (OpTag t) = T.unpack t
 
 infixr 5 \/
 (\/), (\\) :: Ord a => Set.Set a -> Set.Set a -> Set.Set a

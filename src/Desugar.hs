@@ -33,7 +33,7 @@ instance Desugar S.Expr C.Expr where
     S.Abs x c -> C.Abs x (desugar c)
     S.Handler x p c ocs -> C.Handler x p (desugar c) (desugar ocs)
     S.Arith a -> C.Arith (desugar a)
-    S.ADT a -> C.ADT (desugar a)
+    S.Cons c es -> C.Cons c (desugar <$> es)
 
 instance Desugar S.Lit C.Lit where
   desugar (S.LInt i) = C.LInt i
@@ -43,14 +43,6 @@ instance Desugar S.Lit C.Lit where
 instance Desugar S.OpCase C.OpCase where
   desugar (S.Nil x) = C.Nil x
   desugar (S.OpCase op x k c ocs) = C.OpCase op x k (desugar c) (desugar ocs)
-
-instance Desugar S.ADT C.ADT where
-  desugar (S.Inl e) = C.Inl (desugar e)
-  desugar (S.Inr e) = C.Inr (desugar e)
-  desugar (S.Prod e1 e2) = C.Prod (desugar e1) (desugar e2)
-  desugar (S.Cons c es) = C.Cons c (desugar <$> es)
-  desugar (S.Fold e) = C.Fold (desugar e)
-  desugar (S.Unfold e) = C.Unfold (desugar e)
 
 instance Desugar S.Arith C.Arith where
   desugar (S.BOp b e1 e2) = C.BOp (toCore b) (desugar e1) (desugar e2)
@@ -121,7 +113,7 @@ toCoreMatch x = let x' = step1 x
     step2 (GenMatch ((GenMatchLn [] c):_)) = Left (desugar c)
     -- step4: split the original patterns into two groups `A` and `B`
     step4 :: GenMatch 
-          -> Id                   -- the constructor of the selected pattern
+          -> ConsName                   -- the constructor of the selected pattern
           -> Id                   -- the bound var to be matched
           -> [Id]                 -- the freevars generated 
           -> (GenMatch, GenMatch) -- the result, for `A` and `B` respectively

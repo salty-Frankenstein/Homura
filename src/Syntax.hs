@@ -3,10 +3,12 @@
 -}
 {-# LANGUAGE OverloadedStrings #-}
 module Syntax
-  ( Expr(..), ADT(..), Arith(..), BOp(..), UOp(..)
+  ( Expr(..), Arith(..), BOp(..), UOp(..)
   , Computation(..), Lit(..), OpCase(..), Pattern(..)
-  , AST(..), Decl(..), TypeTerm(..)
+  , AST(..), Decl(..), OpDecl(..), TypeTerm(..)
   , traverseOcs
+  , TypeEntry(..), ConsSignature, OpSignature
+  , nameResolution
   ) where
 
 import Prelude hiding ((<>))
@@ -24,23 +26,14 @@ data Expr
   | Handler Id PureType Computation OpCase
   -- builtin arithmetrics
   | Arith Arith
-  | ADT ADT
-
--- algebraic data types
-data ADT
-  = Inl Expr
-  | Inr Expr 
-  | Prod Expr Expr 
-  | Fold Expr 
-  | Cons Id [Expr]
-  | Unfold Expr 
+  | Cons ConsName [Expr]
 
 -- TODO: Add more
 data Arith = BOp BOp Expr Expr | UOp UOp Expr 
 data BOp = Add | Sub | Mul | Div | Eq | Lt | Gt | And | Or
-  deriving Show
+  deriving (Show, Eq)
 data UOp = Neg | Not
-  deriving Show
+  deriving (Show, Eq)
 
 data Lit
   = LInt Int
@@ -65,7 +58,7 @@ data Computation
 
 data Pattern
   = PWild
-  | PCons Id [Pattern]
+  | PCons ConsName [Pattern]
   | PVar Id
   -- TODO: Lit?
 
@@ -83,48 +76,48 @@ instance Show Pattern where
 data Decl
   = TermDecl Id Expr
   | DataDecl Id [TypeTerm] -- sum of prods
+  | EffectDecl Id [OpDecl]
 
-data TypeTerm = TypeTerm Id [Id] -- the constructor & types of the prod
+data TypeTerm = TypeTerm ConsName [PureType] -- the constructor & types of the prod
+data OpDecl = OpDecl OpTag PureType PureType
 
 data Program = Program [Decl] Computation
 
 type TermMap = Map.Map Id Expr
-type TypeMap = Map.Map Id PureType
+data TypeEntry = TypeEntry 
+                   { retType :: PureType 
+                   , arity :: Int
+                   , paramType :: [PureType] }
+-- signatures for data constructors
+-- map from a constructor to its return type, arity and parameter types
+type ConsSignature = Map.Map ConsName TypeEntry 
+-- signatures for operations
+type OpSignature = Map.Map OpTag (PureType, PureType)
 
-nameResolution :: [Decl] -> (TermMap, TypeMap)
-nameResolution [] = (Map.empty, Map.empty)
+nameResolution :: [Decl] -> (TermMap, ConsSignature, OpSignature)
+nameResolution [] = (Map.empty, Map.empty, Map.empty)
 nameResolution (d:ds) = 
   case d of
-    TermDecl x e -> (Map.insert x e tm, ty)
-    DataDecl x s -> let (ty', ts) = toSum s
-                     in (tm, Map.insert x ts (Map.union ty ty'))
+    TermDecl x e -> (Map.insert x e tm, cs, os)
+    DataDecl x s -> let cs' = Map.fromList (map (f x) s)
+                     in (tm, Map.union cs' cs, os)
+    -- TODO: what to do with the `eff`?
+    EffectDecl eff ops -> let os' = Map.fromList 
+                                      (map (\(OpDecl op t1 t2) -> (op, (t1, t2))) ops)
+                           in (tm, cs, Map.union os' os)
   where
-    (tm, ty) = nameResolution ds
+    (tm, cs, os) = nameResolution ds
 
-    -- since declaration of ADTs will introduce constructors
-    -- it will return a map from constructor names to the type related
-    -- during the process
-    toSum :: [TypeTerm] -> (TypeMap, PureType)
-    toSum [] = (Map.empty, typeBottom)  -- TODO: check this
-    toSum [TypeTerm x types] = let res = toProd types
-                                in (Map.singleton x res, res)
-    toSum (TypeTerm x types:xs) = let (tm, t) = toSum xs
-                                      res = toProd types
-                                   in (Map.insert x res tm, TSum res t)
+    -- process one data constructor entry
+    f :: Id -> TypeTerm -> (ConsName, TypeEntry)
+    f retTy (TypeTerm cons ts') = (cons, TypeEntry (TCon retTy) (length ts') ts')
 
-    toProd :: [Id] -> PureType
-    toProd [] = typeTop
-    toProd [x] = TCon x
-    toProd (x:xs) = TProd (TCon x) (toProd xs)
-
-afold :: (Expr -> VarSet) -> ADT -> VarSet
-afold f t = case t of
-  Inl e -> f e
-  Inr e -> f e 
-  Prod e1 e2 -> f e1 \/ f e2
-  Cons _ es -> Set.unions (f <$> es)
-  Fold e -> f e
-  Unfold e -> f e
+    -- get a corresponding function version of the constructor
+    -- TODO: after desugaring finished
+    -- g :: TypeTerm -> (Id, Expr)
+    -- g (TypeTerm cons ts') = (cons, ADT (Cons cons params))
+    --   where
+    --     params = Var <$> take (length ts') letters
 
 class AST a where
   freeVars :: a -> VarSet
@@ -136,7 +129,7 @@ instance AST Expr where
   freeVars (Arith (UOp _ e))     = freeVars e
   freeVars (Abs x c)             = freeVars c \\ Set.singleton x
   freeVars (Handler x _ c ocs)   = (freeVars c \\ Set.singleton x) \/ freeVars ocs
-  freeVars (ADT t)               = afold freeVars t
+  freeVars (Cons _ es)               = Set.unions (freeVars <$> es)
 
 instance AST OpCase where
   freeVars Nil{} = Set.empty
@@ -159,12 +152,12 @@ instance AST Computation where
 
       patBinders :: Pattern -> VarSet
       patBinders PWild = Set.empty
-      patBinders (PCons x ps) = Set.singleton x \/ Set.unions (patBinders <$> ps)
+      patBinders (PCons ConsName{} ps) = Set.unions (patBinders <$> ps)
       patBinders (PVar x) = Set.singleton x
 
 instance AST Pattern where
   freeVars PWild = Set.empty
-  freeVars (PCons x ps) = Set.singleton x \/ Set.unions (freeVars <$> ps)
+  freeVars (PCons ConsName{} ps) = Set.unions (freeVars <$> ps)
   freeVars (PVar x) = Set.singleton x
 
 -- pretty printing AST
@@ -210,13 +203,7 @@ instance Pretty Expr where
                  case uop of
                    Neg -> text "-" <+> pp v
                    Not -> text "!" <+> pp v
-  ppr p (ADT t) = parensIf p $ case t of
-    Inl x -> "Inl" <+> ppr 1 x
-    Inr x -> "Inr" <+> ppr 1 x
-    Prod x1 x2 -> char '<' <> ppr 0 x1 <> comma <+> ppr 0 x2 <> char '>'
-    Cons c es -> text' c <+> parens (hsep (ppr 0 <$> es))
-    Fold x -> "fold" <+> ppr 1 x
-    Unfold x -> "unfold" <+> ppr 1 x 
+  ppr p (Cons (ConsName c) es) = parensIf p $ text' c <+> hsep (parens.ppr 0 <$> es)
 
 instance Pretty OpCase where 
   ppr _ Nil{} = empty
@@ -242,5 +229,5 @@ instance Pretty Computation where
 
 instance Pretty Pattern where
   ppr _ PWild = "_"
-  ppr p (PCons x ps) = parensIf p $ text' x <+> hsep (ppr 1 <$> ps)
+  ppr p (PCons (ConsName x) ps) = parensIf p $ text' x <+> hsep (ppr 1 <$> ps)
   ppr _ (PVar x) = text' x

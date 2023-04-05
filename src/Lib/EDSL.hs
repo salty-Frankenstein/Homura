@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Lib.EDSL where
+import Common
 import Syntax
 import Type
 import Data.String
@@ -58,7 +59,7 @@ opcase op = OpCase (unwrapOp op)
 -- TODO: fix it later
 handler x = Handler x undefined 
 nil = Nil undefined
-c0 x = Expr' $ ADT $ Cons x []
-c1 x (Expr' y1) = Expr' $ ADT $ Cons x [y1]
-c2 x (Expr' y1) (Expr' y2) = Expr' $ ADT $ Cons x [y1, y2]
-c3 x (Expr' y1) (Expr' y2) (Expr' y3) = Expr' $ ADT $ Cons x [y1, y2, y3]
+c0 x = Expr' $ Cons x []
+c1 x (Expr' y1) = Expr' $ Cons x [y1]
+c2 x (Expr' y1) (Expr' y2) = Expr' $ Cons x [y1, y2]
+c3 x (Expr' y1) (Expr' y2) (Expr' y3) = Expr' $ Cons x [y1, y2, y3]

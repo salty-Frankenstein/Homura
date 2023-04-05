@@ -1,4 +1,4 @@
 module Main (main) where
 
 main :: IO ()
-main = undefined
+main = print "test"

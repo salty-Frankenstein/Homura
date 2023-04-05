@@ -10,8 +10,6 @@ import Utils.Pretty
 import Text.PrettyPrint
 import Common
 
-newtype OpTag = OpTag T.Text deriving (Show, Eq, Ord)
-
 newtype TVar = TV T.Text
   deriving (Show, Eq, Ord)
 
@@ -39,6 +37,12 @@ data DirtyType
 -- TODO: check this definition later
 data Dirt = Dirt (Set.Set OpTag) DVar
   deriving (Eq, Ord)
+
+dirtVar :: Id -> Dirt
+dirtVar d = Dirt Set.empty (DV d)
+
+typeVar :: Id -> PureType
+typeVar t = TVar (TV t)
 
 class Rename a where
   -- apply a renaming mapping
@@ -95,7 +99,7 @@ instance Pretty DirtyType where
 
 instance Pretty Dirt where
   ppr _ (Dirt t (DV d)) | Set.null t = text' d
-                        | otherwise = text (show (Set.toList t) ++ " | ") <> text' d
+                        | otherwise = text (show (Set.toList t) ++ "|") <> text' d
 
 instance Show PureType where 
   show = render . pp 
