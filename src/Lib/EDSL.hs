@@ -36,10 +36,12 @@ p3 x (Pattern' y1) (Pattern' y2) (Pattern' y3) = Pattern' $ PCons x [y1, y2, y3]
 
 -- computations
 ret = Ret . unwrapE
-(Expr' a) <| (Expr' b) = App a b
+(Expr' a) <| (Expr' b) = App a b []
+(Expr' a) .$ (Expr' b : bs) = App a b (unwrapE <$> bs)
+_ .$ _ = undefined
 if' (Expr' a) = If a 
-c1 >-> _c2 = Do "_" c1 _c2
-(OpTag' x) <~ (Expr' y) = OpCall x y
+c1 >-> _c2 = Do [Bind "_" c1] _c2 
+(OpTag' x) </ (Expr' y) = OpCall x y
 h |=> c = WithHandle h c 
 
 (~>) :: Pattern' -> Computation -> Writer [(Pattern, Computation)] ()
@@ -49,7 +51,13 @@ match :: Expr' -> Writer [(Pattern, Computation)] a -> Computation
 match (Expr' e) x = let res = execWriter x
                      in Case e res
 
-do' = Do
+(<~) :: Id -> Computation -> Writer [DoStmt] ()
+x <~ c = tell [Bind x c]
+
+do' :: Writer [DoStmt] () -> Computation -> Computation
+do' x = let res = execWriter x
+         in Do res 
+
 let' x e c = Let x (unwrapE e) c
 
 -- expressions

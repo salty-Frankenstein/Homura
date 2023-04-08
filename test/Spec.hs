@@ -64,19 +64,21 @@ testCaseinput = [
   ]
 
 choose = fun "x" .> ret (fun "y" .>
-    do' "b" ("decide" <~ unit)
+    do' ("b" <~ ("decide" </ unit))
       (if' "b" (ret "x") (ret "y")))
 
-chooseDiff = do' "x1" (binop choose (i 15) (i 30))
-              (do' "x2" (binop choose (i 5) (i 10))
-              (do' "diff" (binop sub "x1" "x2")
-              (ret "diff")))
+chooseDiff = do' (do
+              "x1" <~ binop choose (i 15) (i 30)
+              "x2" <~ binop choose (i 5) (i 10)
+              "diff" <~ binop sub "x1" "x2")
+              (ret "diff")
 pickMax = handler "x" (ret "x")
                   (opcase "decide" "_" "k" 
-                    (do' "xt" ("k" <| true)
-                    (do' "xf" ("k" <| false)
-                    (do' "max" (binop max' "xt" "xf")
-                    (ret "max")))) 
+                    (do' (do
+                       "xt" <~ ("k" <| true)
+                       "xf" <~ ("k" <| false)
+                       "max" <~ binop max' "xt" "xf")
+                       (ret "max"))
                   nil)
 
 pickTrue = handler "x" (ret "x")
@@ -94,7 +96,7 @@ testInfer :: (Rename r, Substitutable r, Show r, Show a, Collect a r)
           => a -> Signature -> IO ()
 testInfer x s = do
   putStrLn "==========================="
-  putStrLn $ "infering term: " ++ show x
+  putStrLn $ "inferring term: " ++ show x
   res <- runInferIO x s
   putStrLn "----------\nunification:"
   case res of
@@ -132,10 +134,11 @@ main = do
   testInfer pickTrue decideSig
   testInfer (unwrapE $ fun "f" .> ret (fun "x" .> ("f" <| "x"))) emptySig
   let poly1 = let' "f" (fun "x" .> ret "x") 
-                (do' "b" ("f" <| true)
+                (do' ("b" <~ ("f" <| true))
                   (if' "b" ("f" <| i 1) ("f" <| i 2)))
   let poly2 = let' "const" (fun "y" .> ret (fun "x" .> ret "y")) 
-                (let' "c1" (fun "x" .> do' "f" ("const" <| i 1) ("f" <| "x"))
+                (let' "c1" 
+                (fun "x" .> ("const" .$ [i 1, "x"]))
                   (if' true ("c1" <| true) ("c1" <| i 1)))
   testInfer poly1 emptySig
   testInfer poly2 emptySig

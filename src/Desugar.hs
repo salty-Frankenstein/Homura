@@ -16,13 +16,20 @@ class Desugar a r | a -> r where
 instance Desugar S.Computation C.Computation where
   desugar sc = case sc of
     S.Ret e -> C.Ret (desugar e)
-    S.App e1 e2 -> C.App (desugar e1) (desugar e2)
+    S.App e1 e2 es -> let first = C.App (desugar e1) (desugar e2)
+                          f :: C.Computation -> S.Expr -> C.Computation
+                          f c e = C.Do "*" c (C.App (C.Var "*") (desugar e)) 
+                       in foldl f first es
     S.If e c1 c2 -> C.If (desugar e) (desugar c1) (desugar c2)
     S.OpCall op e -> C.OpCall op (desugar e) "y" (C.Ret (C.Var "y"))
     S.WithHandle e c -> C.WithHandle (desugar e) (desugar c)
     S.Absurd d e -> C.Absurd d (desugar e)
     S.Let x e c -> C.Let x (desugar e) (desugar c)
-    S.Do x c1 c2 -> C.Do x (desugar c1) (desugar c2)
+    S.Do [] ret -> desugar ret
+    S.Do (ds:dss) ret -> case ds of
+      S.Bind x c -> C.Do x (desugar c) (desugar (S.Do dss ret))
+      S.DoLet x e -> C.Let x (desugar e) (desugar (S.Do dss ret))
+      S.DoC c -> C.Do "_" (desugar c) (desugar (S.Do dss ret))
     S.DoRec f x c1 c2 -> C.DoRec f x (desugar c1) (desugar c2)
     cs@S.Case{} -> desugarCase cs
 
@@ -104,7 +111,7 @@ toCoreMatch x = let x' = step1 x
       in case p of
         S.PWild -> undefined -- TODO
         S.PCons{} -> GenMatchLn ((a, p):ps') e'
-        S.PVar x -> GenMatchLn ps' (S.Do x (S.Ret (S.Var a)) e')
+        S.PVar x -> GenMatchLn ps' (S.Do [S.Bind x (S.Ret (S.Var a))] e')
     -- step2: select one of the tests in the first clause
     -- the choice is heuristic, here I just take the first instead
     step2 :: GenMatch -> Either C.Computation (Id, S.Pattern)

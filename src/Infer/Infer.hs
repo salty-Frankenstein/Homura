@@ -24,6 +24,11 @@ data Constraint
   | CDirtLE Dirt Dirt              -- a dirt is smaller than another
   deriving (Eq, Ord)
 
+substCons :: Map.Map Id Id -> Constraint -> Constraint
+substCons s (CPureTLE a1 a2) = CPureTLE (apply s a1) (apply s a2)
+substCons s (CDirtyTLE d1 d2) = CDirtyTLE (apply s d1) (apply s d2)
+substCons s (CDirtLE d1 d2) = CDirtLE (apply s d1) (apply s d2)
+
 instance Show Constraint where
   show (CPureTLE p1 p2) = show p1 ++ " <= " ++ show p2
   show (CDirtyTLE d1 d2) = show d1 ++ " <= " ++ show d2
@@ -36,7 +41,7 @@ data Scheme = Forall VarSet PureType ConsSet
 
 -- the normal typing context
 type MonoCtx = Map.Map Id PureType
--- the polymorphic context, which is the map of variables to type schemes
+-- the polymorphic context, which is the mapping of variables to type schemes
 type PolyCtx = Map.Map Id Scheme
 data Context = Context MonoCtx PolyCtx
 emptyCtx = Context Map.empty Map.empty
@@ -105,7 +110,9 @@ instance Collect Expr PureType where
         let s = Map.fromList nn's
             f' = Set.fromList (snd <$> nn's)
             a' = apply s a
-        return (Res f' a' cons)
+            -- substitute the captured constraints as well
+            cons' = Set.map (substCons s) cons
+        return (Res f' a' cons')
       (Nothing, Nothing) -> throwError $ "undefined variable: " ++ show x
       _ -> error "internal error: mctx & pctx should be disjoint"
   -- literals
@@ -200,19 +207,38 @@ instance Collect Computation DirtyType where
       return (Res (Set.insert d f) (DirtyType a dv) cons)
 
     -- Cstr-App
-    App e1 e2 -> do
-      tell $ "\n\nin app: " ++ show _c ++ "\n"
-      Res f1 a1 cons1 <- collectConstraints ctx e1
-      Res f2 a2 cons2 <- collectConstraints ctx e2
-      _al <- getFreshName
-      d <- getFreshName
-      let dv = dirtVar d
-          al = typeVar _al
-          resultTy = DirtyType al dv
-          cons' = Set.insert (CPureTLE a1 (TFunc a2 resultTy)) cons1 \/ cons2 
-          f' = f1 \/ f2 \/ Set.fromList [_al, d]
-      tell $ show (Res f' resultTy cons')
-      return (Res f' resultTy cons')
+    App fe e es -> do
+      Res f1 a1 cstr1 <- collectConstraints ctx fe
+      let 
+          f :: InferMonad m 
+                 => m (DirtyType, ConsSet, VarSet)
+                 -> Expr
+                 -> m (DirtyType, ConsSet, VarSet)
+          f lst e' = do
+            -- for each argument expression
+            -- get the previous type as the function type `a`
+            (DirtyType a _, cstr, fs) <- lst
+            -- the current argument type is `a'`
+            Res f' a' cstr' <- collectConstraints ctx e'
+            tell $ "\n  in app, now: " ++ show e' ++ " ;with function type: " ++ show a
+            tell $ "\n  res: " ++ show (a', cstr')
+
+            -- generate the new result type
+            _al <- getFreshName
+            d <- getFreshName
+            let dv = dirtVar d
+                al = typeVar _al
+                resultTy = DirtyType al dv
+                -- insert a new constraint: a <= a' -> al!dv
+                cstr'' = cstr \/ cstr'
+                      \/ Set.fromList [CPureTLE a (TFunc a' resultTy)] 
+                f'' = fs \/ f' \/ Set.fromList [_al, d]
+            -- return `al` as the next return type
+            tell $ "\nres of this term: " ++ show (resultTy, cstr'', f'')
+            return (resultTy, cstr'', f'')
+      -- HACK: dummy argument here, the dirt won't be used in the fold
+      (ra, rcstr, rf) <- foldl f (return (DirtyType a1 undefined, cstr1, f1)) (e:es)
+      return (Res rf ra rcstr)
 
     -- Cstr-IfThenElse
     If e cm1 cm2 -> do
@@ -266,8 +292,8 @@ instance Collect Computation DirtyType where
           cons' = Set.insert (CPureTLE a typeBottom) cons
           f' = f \/ Set.fromList [_al, d]
       return (Res f' resultTy cons')
-    -- CStr-LetVar
 
+    -- CStr-LetVar
     Let x e cm -> do
       tt@(Res f1 a cons1) <- collectConstraints ctx e
       tell $ "\n\nin let:\n"
@@ -277,20 +303,47 @@ instance Collect Computation DirtyType where
       return (Res f2 c cons2)
 
     -- Cstr-Let
-    Do x c1 c2 -> do
-      Res f1 (DirtyType a d1) cons1 <- collectConstraints ctx c1
-      _al <- getFreshName
+    Do stmts ret -> do
       d <- getFreshName
-      let dv = dirtVar d
-          al = typeVar _al
-          ctx' = Context (mctx ?: (x, al)) pctx
-      Res f2 (DirtyType b d2) cons2 <- collectConstraints ctx' c2
+      let dv = dirtVar d  -- the dirt of the whole computation
+          -- process each statement
+          f :: InferMonad m 
+            => m (Context, ConsSet, VarSet)
+            -> DoStmt 
+            -> m (Context, ConsSet, VarSet)
+          f lst stmt = case stmt of
+            Bind x c -> do
+              (lctx@(Context lmctx lpctx), lcstr, lf) <- lst
+              -- infer with last context
+              Res f' (DirtyType a d1) cstr' <- collectConstraints lctx c
+              _al <- getFreshName
+              let al = typeVar _al
+              let ctx' = Context (lmctx ?: (x, al)) lpctx
+                  -- dirt of each subcomputation should be smaller than the whole dirt
+                  cstr'' = lcstr \/ cstr' \/ Set.fromList [CPureTLE al a, CDirtLE d1 dv]
+              -- tell "\n----------"
+              -- tell $ "\ncurrent ctx: " ++ show lmctx
+              -- tell $ "\ncurrent var: " ++ show (x, al)
+              -- tell $ "\nnew ctx: " ++ show (lmctx ?: (x, al))
+              return (ctx', cstr'', Set.insert _al f' \/ lf)
+            DoLet x e -> do
+              (lctx@(Context lmctx lpctx), lcstr, lf) <- lst
+              Res f' a' cstr' <- collectConstraints lctx e
+              let ctx' = Context lmctx (lpctx ?: (x, Forall f' a' cstr'))
+              -- only changes the poly context
+              return (ctx', lcstr, lf)
+            DoC c -> do
+              (lctx, lcstr, lf) <- lst
+              Res f' (DirtyType _ d1) cstr' <- collectConstraints lctx c
+              -- dirt of each subcomputation should be smaller than the whole dirt
+              return (lctx, Set.insert (CDirtLE d1 dv) cstr' \/ lcstr, f' \/ lf)
+
+      (lctx, lcstr, lf) <- foldl f (return (ctx, Set.empty, Set.empty)) stmts
+      -- infer with the collected context, get the result type
+      Res fr (DirtyType b dr) cstr <- collectConstraints lctx ret
       let resultTy = DirtyType b dv
-          cons' = cons1 \/ cons2 \/ Set.fromList 
-                    [ CPureTLE a al
-                    , CDirtLE d1 dv
-                    , CDirtLE d2 dv]
-          f' = f1 \/ f2 \/ Set.fromList [_al, d]
+          cons' = cstr \/ lcstr \/ Set.singleton (CDirtLE dr dv)
+          f' = fr \/ lf \/ Set.singleton d
       return (Res f' resultTy cons')
 
     -- Cstr-LetRec
@@ -355,8 +408,8 @@ runInferIO :: (Show r, Collect p r) => p -> Signature
 runInferIO e signature = do
     let (res, info) = runInfer e signature
     case res of
-      Right r -> putStrLn $ "the infered result is: " ++ show r
-      Left err -> putStrLn $ "error in typechecking: " ++ err
+      Right r -> putStrLn $ "the inferred result is: " ++ show r
+      Left err -> red $ "error in typechecking: " ++ err
     putStrLn "-------------------"
     yellow $ "infer log: " ++ info
     return res

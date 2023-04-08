@@ -4,7 +4,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Syntax
   ( Expr(..), Arith(..), BOp(..), UOp(..)
-  , Computation(..), Lit(..), OpCase(..), Pattern(..)
+  , Computation(..), Lit(..), OpCase(..), Pattern(..), DoStmt(..)
   , AST(..), Decl(..), OpDecl(..), TypeTerm(..)
   , traverseOcs
   , TypeEntry(..), ConsSignature, OpSignature
@@ -46,15 +46,20 @@ data OpCase
 
 data Computation
   = Ret Expr
-  | App Expr Expr
+  | App Expr Expr [Expr]
   | If Expr Computation Computation
   | OpCall OpTag Expr
   | WithHandle Expr Computation
   | Absurd DirtyType Expr
   | Let Id Expr Computation
-  | Do Id Computation Computation
+  | Do [DoStmt] Computation
   | DoRec Id Id Computation Computation
   | Case Expr [(Pattern, Computation)]
+
+data DoStmt 
+  = Bind Id Computation 
+  | DoLet Id Expr
+  | DoC Computation
 
 data Pattern
   = PWild
@@ -137,13 +142,19 @@ instance AST OpCase where
 
 instance AST Computation where
   freeVars (Ret e)                  = freeVars e
-  freeVars (App e1 e2)              = freeVars e1 \/ freeVars e2
+  freeVars (App e1 e2 es)           = freeVars e1 \/ freeVars e2 \/ Set.unions (freeVars <$> es)
   freeVars (If e c1 c2)             = freeVars e \/ freeVars c1 \/ freeVars c2
   freeVars (OpCall (OpTag _) e)     = freeVars e
   freeVars (WithHandle h c)         = freeVars h \/ freeVars c
   freeVars (Absurd _ e)             = freeVars e
   freeVars (Let x e c)              = freeVars e \/ (freeVars c \\ Set.singleton x)
-  freeVars (Do x c1 c2)             = freeVars c1 \/ (freeVars c2 \\ Set.singleton x)
+  freeVars (Do stmts ret)           = fvs' \/ (freeVars ret \\ bvs')
+    where
+      (fvs', bvs') = foldl f (Set.empty, Set.empty) stmts
+      f (fvs, bvs) (Bind x c) = (fvs \/ (freeVars c \\ bvs), Set.insert x bvs)
+      f (fvs, bvs) (DoLet x e) = (fvs \/ (freeVars e \\ bvs), Set.insert x bvs)
+      f (fvs, bvs) (DoC c) = (fvs \/ freeVars c, bvs)
+
   freeVars (DoRec f x c1 c2)        = freeVars c1 \/ (freeVars c2 \\ Set.fromList [f, x])
   freeVars (Case e ps) = freeVars e \/ Set.unions (freePat <$> ps)
     where
@@ -214,7 +225,7 @@ instance Pretty OpCase where
 
 instance Pretty Computation where 
   ppr p (Ret e) = parensIf p $ "return" <+> ppr (p+1) e
-  ppr p (App a b) = parensIf p $ ppr 1 a <+> ppr 1 b
+  ppr p (App a b es) = parensIf p $ ppr 1 a <+> ppr 1 b <+> hsep (ppr 1 <$> es)
   ppr p (If e c1 c2) = parensIf p $
       "if" <+> pp e <+> "then" <+> pp c1 <+> "else" <+> pp c2
   ppr p (OpCall (OpTag op) x) = text' op 
@@ -222,10 +233,15 @@ instance Pretty Computation where
   ppr p (WithHandle h c) = parensIf p $ "with" <+> ppr 1 h <+> "handle" <+> ppr 1 c
   ppr p (Absurd _ e) = parensIf p $ "absurd" <+> ppr 1 e
   ppr p (Let x e c) = parensIf p $ "let" <+> text' x <+> "=" <+> ppr 1 e <+> "in" <+> ppr 1 c
-  ppr p (Do x c1 c2) = parensIf p $ "do" <+> text' x <+> "<-" <+> ppr 1 c1 <+> "in" <+> ppr 1 c2  
+  ppr p (Do stmts c) = parensIf p $ "do" <+> lbrace <+> hsep ((<> ";") . ppr 0 <$> stmts) <+> ppr 1 c <+> rbrace
   ppr p (DoRec f x c1 c2) = parensIf p $ "do" <+> text' f <+> text' x <+> "<-" <+> pp c1 <+> text "in" <+> ppr 1 c2  
   ppr p (Case e ps) = parensIf p $ "case" <+> ppr 0 e <+> "of" <+> lbrace 
     <+> hsep ((\(p, e) -> ppr 0 p <+> "->" <+> ppr 0 e <> ";") <$> ps) <+> rbrace
+
+instance Pretty DoStmt where
+  ppr p (Bind x c) = parensIf p $ text' x <+> "<-" <+> ppr 0 c
+  ppr p (DoLet x e) = parensIf p $ "let " <+> text' x <+> "=" <+> ppr 0 e
+  ppr p (DoC c) = ppr p c
 
 instance Pretty Pattern where
   ppr _ PWild = "_"
