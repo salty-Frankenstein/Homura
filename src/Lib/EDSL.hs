@@ -61,8 +61,13 @@ do' x = let res = execWriter x
 let' x e c = Let x (unwrapE e) c
 
 -- expressions
-fun = id
-a .> b = Expr' $ Abs a b
+lam = id
+a .> b = Expr' $ Abs a [] b
+
+fun [] c = undefined 
+fun [x] c = x .> c
+fun (x:xs) c = Expr' $ Abs x xs c
+
 opcase op = OpCase (unwrapOp op)
 -- TODO: fix it later
 handler x = Handler x undefined 

@@ -63,9 +63,9 @@ testCaseinput = [
   , c2 "Add" (c2 "Add" (i 1) (i 1)) (c0 "Zero")
   ]
 
-choose = fun "x" .> ret (fun "y" .>
+choose = fun ["x", "y"] $
     do' ("b" <~ ("decide" </ unit))
-      (if' "b" (ret "x") (ret "y")))
+      (if' "b" (ret "x") (ret "y"))
 
 chooseDiff = do' (do
               "x1" <~ binop choose (i 15) (i 30)
@@ -132,13 +132,12 @@ main = do
   let (_, cs, os) = S.nameResolution [S.EffectDecl "dummy" [S.OpDecl (OpTag "decide") typeTop typeBool]]
       decideSig = Signature cs os
   testInfer pickTrue decideSig
-  testInfer (unwrapE $ fun "f" .> ret (fun "x" .> ("f" <| "x"))) emptySig
-  let poly1 = let' "f" (fun "x" .> ret "x") 
+  testInfer (unwrapE $ fun ["f", "x"] ("f" <| "x")) emptySig
+  let poly1 = let' "f" (lam "x" .> ret "x") 
                 (do' ("b" <~ ("f" <| true))
                   (if' "b" ("f" <| i 1) ("f" <| i 2)))
-  let poly2 = let' "const" (fun "y" .> ret (fun "x" .> ret "y")) 
-                (let' "c1" 
-                (fun "x" .> ("const" .$ [i 1, "x"]))
+  let poly2 = let' "const" (fun ["y", "x"] (ret "y"))
+                (let' "c1" (lam "x" .> ("const" .$ [i 1, "x"]))
                   (if' true ("c1" <| true) ("c1" <| i 1)))
   testInfer poly1 emptySig
   testInfer poly2 emptySig

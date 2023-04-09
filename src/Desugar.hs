@@ -37,7 +37,9 @@ instance Desugar S.Expr C.Expr where
   desugar se = case se of
     S.Var x -> C.Var x
     S.Lit v -> C.Lit (desugar v)
-    S.Abs x c -> C.Abs x (desugar c)
+    S.Abs x xs c -> let f :: Id -> C.Computation -> C.Computation
+                        f x' c' = C.Ret (C.Abs x' c')
+                     in C.Abs x (foldr f (desugar c) xs)
     S.Handler x p c ocs -> C.Handler x p (desugar c) (desugar ocs)
     S.Arith a -> C.Arith (desugar a)
     S.Cons c es -> C.Cons c (desugar <$> es)

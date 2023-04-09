@@ -18,11 +18,12 @@ import qualified Data.Map as Map
 import Type
 import Common
 import qualified Data.Set.Monad as Set
+import Data.Maybe (mapMaybe)
 
 data Expr
   = Var Id
   | Lit Lit
-  | Abs Id Computation
+  | Abs Id [Id] Computation
   | Handler Id PureType Computation OpCase
   -- builtin arithmetrics
   | Arith Arith
@@ -105,7 +106,8 @@ nameResolution (d:ds) =
   case d of
     TermDecl x e -> (Map.insert x e tm, cs, os)
     DataDecl x s -> let cs' = Map.fromList (map (f x) s)
-                     in (tm, Map.union cs' cs, os)
+                        tm' = Map.fromList (mapMaybe g s)
+                     in (Map.union tm' tm, Map.union cs' cs, os)
     -- TODO: what to do with the `eff`?
     EffectDecl eff ops -> let os' = Map.fromList 
                                       (map (\(OpDecl op t1 t2) -> (op, (t1, t2))) ops)
@@ -118,11 +120,16 @@ nameResolution (d:ds) =
     f retTy (TypeTerm cons ts') = (cons, TypeEntry (TCon retTy) (length ts') ts')
 
     -- get a corresponding function version of the constructor
+    -- if arity of the constructor is greater than 1
     -- TODO: after desugaring finished
-    -- g :: TypeTerm -> (Id, Expr)
-    -- g (TypeTerm cons ts') = (cons, ADT (Cons cons params))
-    --   where
-    --     params = Var <$> take (length ts') letters
+    g :: TypeTerm -> Maybe (Id, Expr)
+    g (TypeTerm cons@(ConsName conss) ts') 
+      | arity >= 1 = Just (conss, func)
+      | otherwise = Nothing
+      where
+        arity = length ts'
+        params@(p:ps) = take arity letters
+        func = Abs p ps (Ret (Cons cons (Var <$> params)))
 
 class AST a where
   freeVars :: a -> VarSet
@@ -132,9 +139,9 @@ instance AST Expr where
   freeVars Lit{}                 = Set.empty
   freeVars (Arith (BOp _ e1 e2)) = freeVars e1 \/ freeVars e2
   freeVars (Arith (UOp _ e))     = freeVars e
-  freeVars (Abs x c)             = freeVars c \\ Set.singleton x
+  freeVars (Abs x xs c)          = freeVars c \\ Set.fromList (x:xs)
   freeVars (Handler x _ c ocs)   = (freeVars c \\ Set.singleton x) \/ freeVars ocs
-  freeVars (Cons _ es)               = Set.unions (freeVars <$> es)
+  freeVars (Cons _ es)           = Set.unions (freeVars <$> es)
 
 instance AST OpCase where
   freeVars Nil{} = Set.empty
@@ -193,7 +200,7 @@ instance Pretty Lit where
 instance Pretty Expr where
   ppr _ (Lit l) = pp l
   ppr _ (Var x) = text' x
-  ppr p (Abs x a) = parensIf p $ char '\\' <>  text' x <+> "." <+> pp a
+  ppr p (Abs x xs a) = parensIf p $ char '\\' <>  text' x <+> hsep (text' <$> xs) <+> "." <+> pp a
   ppr p (Handler x _ c ocs) = parensIf p $ "handler" <+> braces body
       where body = "return" <+> text' x <+> "->" <+> pp c <> comma <+> pp ocs
   ppr p (Arith a) = parensIf p body

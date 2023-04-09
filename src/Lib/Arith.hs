@@ -4,8 +4,8 @@ module Lib.Arith where
 import Syntax
 import Lib.EDSL 
 
-add = fun "x" .> ret (fun "y" .> ret (Expr' . Arith $ BOp Add (Var "x") (Var "y")))
-sub = fun "x" .> ret (fun "y" .> ret (Expr' . Arith $ BOp Sub (Var "x") (Var "y")))
+add = fun ["x", "y"] $ ret (Expr' . Arith $ BOp Add (Var "x") (Var "y"))
+sub = fun ["x", "y"] $ ret (Expr' . Arith $ BOp Sub (Var "x") (Var "y"))
 binop (Expr' f) (Expr' x) (Expr' y) = App f x [y]
 (?+) = binop add
 tx = i 6 ?+ i 8
@@ -16,7 +16,7 @@ tz = (i 1 ?+ i 2) >-> ("_" ?+ i 3) >-> ("_" ?+ i 10)
 -- >>> exec' tz
 -- return 16
 
-max' = fun "x" .> ret (fun "y" .>  
+max' = lam "x" .> ret (lam "y" .>  
       If (Arith $ BOp Gt (Var "x") (Var "y"))
         (ret "x")
         (ret "y"))
