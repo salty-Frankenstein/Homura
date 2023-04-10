@@ -1,0 +1,15 @@
+{- first program in Homura!! -}
+
+data Zero | Suc Nat : Nat
+let x = 1
+let y = \x . pure 1
+
+effect IO {
+  !read : unit -> String;
+  !print : String -> unit
+}
+
+main = do {
+    x <- !read();
+    pure 2
+  }

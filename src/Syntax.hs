@@ -5,14 +5,13 @@
 module Syntax
   ( Expr(..), Arith(..), BOp(..), UOp(..)
   , Computation(..), Lit(..), OpCase(..), Pattern(..), DoStmt(..)
-  , AST(..), Decl(..), OpDecl(..), TypeTerm(..)
+  , AST(..), Decl(..), OpDecl(..), TypeTerm(..), Program(..)
   , traverseOcs
   , TypeEntry(..), ConsSignature, OpSignature
   , nameResolution
   ) where
 
 import Prelude hiding ((<>))
-import qualified Data.Text as T
 import Text.PrettyPrint
 import qualified Data.Map as Map
 import Type
@@ -93,7 +92,7 @@ type TermMap = Map.Map Id Expr
 data TypeEntry = TypeEntry 
                    { retType :: PureType 
                    , arity :: Int
-                   , paramType :: [PureType] }
+                   , paramType :: [PureType] } deriving Show
 -- signatures for data constructors
 -- map from a constructor to its return type, arity and parameter types
 type ConsSignature = Map.Map ConsName TypeEntry 
@@ -188,9 +187,6 @@ class Pretty p where
 parensIf :: Int -> Doc -> Doc 
 parensIf i = if i /= 0 then parens else id
 
-text' :: Id -> Doc
-text' = text . T.unpack
-
 instance Pretty Lit where
   ppr _ l = case l of 
               LInt i -> int i
@@ -199,10 +195,10 @@ instance Pretty Lit where
 
 instance Pretty Expr where
   ppr _ (Lit l) = pp l
-  ppr _ (Var x) = text' x
-  ppr p (Abs x xs a) = parensIf p $ char '\\' <>  text' x <+> hsep (text' <$> xs) <+> "." <+> pp a
+  ppr _ (Var x) = text x
+  ppr p (Abs x xs a) = parensIf p $ char '\\' <>  text x <+> hsep (text <$> xs) <+> "." <+> pp a
   ppr p (Handler x _ c ocs) = parensIf p $ "handler" <+> braces body
-      where body = "return" <+> text' x <+> "->" <+> pp c <> comma <+> pp ocs
+      where body = "return" <+> text x <+> "->" <+> pp c <> comma <+> pp ocs
   ppr p (Arith a) = parensIf p body
     where 
       body = case a of
@@ -221,13 +217,13 @@ instance Pretty Expr where
                  case uop of
                    Neg -> text "-" <+> pp v
                    Not -> text "!" <+> pp v
-  ppr p (Cons (ConsName c) es) = parensIf p $ text' c <+> hsep (parens.ppr 0 <$> es)
+  ppr p (Cons (ConsName c) es) = parensIf p $ text c <+> hsep (parens.ppr 0 <$> es)
 
 instance Pretty OpCase where 
   ppr _ Nil{} = empty
   ppr _ (OpCase (OpTag op) x k c ocs) = 
-        text (T.unpack op)
-    <>  parens (text' x <> semi <> text' k) 
+        text op
+    <>  parens (text x <> semi <> text k) 
     <+> "->" <+> pp c <+> semi <+> pp ocs
 
 instance Pretty Computation where 
@@ -235,22 +231,22 @@ instance Pretty Computation where
   ppr p (App a b es) = parensIf p $ ppr 1 a <+> ppr 1 b <+> hsep (ppr 1 <$> es)
   ppr p (If e c1 c2) = parensIf p $
       "if" <+> pp e <+> "then" <+> pp c1 <+> "else" <+> pp c2
-  ppr p (OpCall (OpTag op) x) = text' op 
+  ppr p (OpCall (OpTag op) x) = text op 
     <> parens (pp x)
   ppr p (WithHandle h c) = parensIf p $ "with" <+> ppr 1 h <+> "handle" <+> ppr 1 c
   ppr p (Absurd _ e) = parensIf p $ "absurd" <+> ppr 1 e
-  ppr p (Let x e c) = parensIf p $ "let" <+> text' x <+> "=" <+> ppr 1 e <+> "in" <+> ppr 1 c
+  ppr p (Let x e c) = parensIf p $ "let" <+> text x <+> "=" <+> ppr 1 e <+> "in" <+> ppr 1 c
   ppr p (Do stmts c) = parensIf p $ "do" <+> lbrace <+> hsep ((<> ";") . ppr 0 <$> stmts) <+> ppr 1 c <+> rbrace
-  ppr p (DoRec f x c1 c2) = parensIf p $ "do" <+> text' f <+> text' x <+> "<-" <+> pp c1 <+> text "in" <+> ppr 1 c2  
+  ppr p (DoRec f x c1 c2) = parensIf p $ "do" <+> text f <+> text x <+> "<-" <+> pp c1 <+> text "in" <+> ppr 1 c2  
   ppr p (Case e ps) = parensIf p $ "case" <+> ppr 0 e <+> "of" <+> lbrace 
     <+> hsep ((\(p, e) -> ppr 0 p <+> "->" <+> ppr 0 e <> ";") <$> ps) <+> rbrace
 
 instance Pretty DoStmt where
-  ppr p (Bind x c) = parensIf p $ text' x <+> "<-" <+> ppr 0 c
-  ppr p (DoLet x e) = parensIf p $ "let " <+> text' x <+> "=" <+> ppr 0 e
+  ppr p (Bind x c) = parensIf p $ text x <+> "<-" <+> ppr 0 c
+  ppr p (DoLet x e) = parensIf p $ "let " <+> text x <+> "=" <+> ppr 0 e
   ppr p (DoC c) = ppr p c
 
 instance Pretty Pattern where
   ppr _ PWild = "_"
-  ppr p (PCons (ConsName x) ps) = parensIf p $ text' x <+> hsep (ppr 1 <$> ps)
-  ppr _ (PVar x) = text' x
+  ppr p (PCons (ConsName x) ps) = parensIf p $ text x <+> hsep (ppr 1 <$> ps)
+  ppr _ (PVar x) = text x

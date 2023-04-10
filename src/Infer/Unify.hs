@@ -3,7 +3,6 @@
 {-# LANGUAGE MonadComprehensions #-}
 module Infer.Unify where
 
-import qualified Data.Text as T
 import qualified Data.Set.Monad as Set
 import qualified Data.Map as Map
 import Control.Monad.State
@@ -38,15 +37,11 @@ instance Substitutable PureType where
     t@TCon{} -> t
     TFunc a d -> TFunc (subst ?$ a) (subst ?$ d)
     THandler d1 d2 -> THandler (subst ?$ d1) (subst ?$ d2)
-    TSum a b -> TSum (subst ?$ a) (subst ?$ b)
-    TProd a b -> TProd (subst ?$ a) (subst ?$ b)
 
   free TCon{} = Set.empty
   free (TVar (TV a)) = Set.singleton a
   free (TFunc a1 a2) = free a1 \/ free a2
   free (THandler d1 d2) = free d1 \/ free d2
-  free (TSum a1 a2) = free a1 \/ free a2
-  free (TProd a1 a2) = free a1 \/ free a2
 
 instance Substitutable DirtyType where
   subst ?$ DirtyType a d = DirtyType (subst ?$ a) (subst ?$ d)
@@ -72,7 +67,7 @@ fromPureSet s = UnifiedConsSet s Set.empty
 fromDirtSet = UnifiedConsSet Set.empty
 
 instance Show UnifiedCons where
-  show (UnifiedCons a b) = T.unpack a ++ " <= " ++ T.unpack b
+  show (UnifiedCons a b) = a ++ " <= " ++ b
 
 (?\) :: UnifiedConsSet -> UnifiedConsSet -> UnifiedConsSet
 (UnifiedConsSet x1 x2) ?\ (UnifiedConsSet y1 y2) = UnifiedConsSet (x1 \\ y1) (x2 \\ y2)
@@ -148,8 +143,6 @@ class ( MonadState UnifyState m
       x@TCon{} -> return x
       TFunc a d -> TFunc <$> refresh a <*> refreshDT d
       THandler d1 d2 -> THandler <$> refreshDT d1 <*> refreshDT d2
-      TSum a1 a2 -> TSum <$> refresh a1 <*> refresh a2
-      TProd a1 a2 -> TProd <$> refresh a1 <*> refresh a2
     where
       refreshDT (DirtyType a d) = DirtyType <$> refresh a <*> refreshD d
       refreshD (Dirt op _) = Dirt op . DV <$> getFreshName
@@ -231,5 +224,5 @@ instance UnifyMonad UnifyM
 
 runUnify :: Set.Set Constraint -> (Either String UnifyState, String)
 runUnify q = runWriter $ runExceptT $ execStateT (unify q)
-               (UnifyState (fromPureMap []) emptyUniConsSet (map (T.cons '_') letters))
+               (UnifyState (fromPureMap []) emptyUniConsSet (map ('_':) letters))
 

@@ -5,7 +5,6 @@ module Desugar (desugar) where
 import Common
 import qualified Syntax as S 
 import qualified Core as C 
-import qualified Data.Text as T
 import qualified Data.Set.Monad as Set
 import Data.List (partition)
 import Data.Maybe (catMaybes)
@@ -142,5 +141,5 @@ instance Show GenMatch where
   show (GenMatch ls) = "genmatch " ++ show ls
 instance Show GenMatchLn where 
   show (GenMatchLn ps c) = foldr (\x y -> x++", "++y) "" 
-                                 ((\(x, p) -> T.unpack x ++ " is " ++ show p) <$> ps)
+                                 ((\(x, p) -> x ++ " is " ++ show p) <$> ps)
                            ++ " => " ++ show c

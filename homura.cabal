@@ -32,6 +32,7 @@ library
       Infer.Unify
       Lib.Arith
       Lib.EDSL
+      Parser
       Syntax
       Type
       Utils.Pretty
@@ -45,6 +46,7 @@ library
     , base >=4.7 && <5
     , containers
     , mtl
+    , parsec
     , pretty
     , set-monad
     , text
@@ -63,6 +65,7 @@ executable homura-exe
     , containers
     , homura
     , mtl
+    , parsec
     , pretty
     , set-monad
     , text
@@ -82,6 +85,7 @@ test-suite homura-test
     , containers
     , homura
     , mtl
+    , parsec
     , pretty
     , set-monad
     , text

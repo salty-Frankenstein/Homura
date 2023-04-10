@@ -10,15 +10,15 @@ import Control.Monad.Writer
 {- overloading string literals for variables, operation tags and patterns -}
 newtype Expr' = Expr' { unwrapE :: Expr}
 instance IsString Expr' where
-  fromString = Expr' . Var . T.pack
+  fromString = Expr' . Var
 
 newtype OpTag' = OpTag' { unwrapOp :: OpTag }
 instance IsString OpTag' where
-  fromString = OpTag' . OpTag . T.pack
+  fromString = OpTag' . OpTag
 
 newtype Pattern' = Pattern' Pattern
 instance IsString Pattern' where
-  fromString = Pattern' . PVar . T.pack
+  fromString = Pattern' . PVar
 
 -- literal expressions
 i = Expr' . Lit . LInt

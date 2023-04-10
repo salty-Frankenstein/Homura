@@ -1,26 +1,25 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Common where
 
-import qualified Data.Text as T
 import qualified Data.Set.Monad as Set
 import qualified Data.Map as Map
 import Data.String
 import Control.Monad
 
-type Id = T.Text
+type Id = String
 type VarSet = Set.Set Id
 
-newtype OpTag = OpTag T.Text deriving (Eq, Ord)
+newtype OpTag = OpTag Id deriving (Eq, Ord)
 newtype ConsName = ConsName Id deriving (Eq, Ord)
 
 instance Show ConsName where
-  show (ConsName x) = T.unpack x
+  show (ConsName x) = x
 
 instance IsString ConsName where
-  fromString = ConsName . T.pack
+  fromString = ConsName
 
 instance Show OpTag where
-  show (OpTag t) = T.unpack t
+  show (OpTag t) = t
 
 infixr 5 \/
 (\/), (\\) :: Ord a => Set.Set a -> Set.Set a -> Set.Set a
@@ -39,7 +38,7 @@ freshNames s = filter (`Set.notMember` s) letters
 freshName :: VarSet -> Id
 freshName = head . freshNames
 letters :: [Id]
-letters = map T.pack $ [1..] >>= flip replicateM ['a'..'z']
+letters = [1..] >>= flip replicateM ['a'..'z']
 
 color d s = putStrLn $ d ++ s ++ "\ESC[0m"
 red = color "\ESC[31m"

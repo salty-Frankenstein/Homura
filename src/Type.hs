@@ -10,10 +10,10 @@ import Utils.Pretty
 import Text.PrettyPrint
 import Common
 
-newtype TVar = TV T.Text
+newtype TVar = TV Id
   deriving (Show, Eq, Ord)
 
-newtype DVar = DV T.Text
+newtype DVar = DV Id
   deriving (Show, Eq, Ord)
 
 data PureType
@@ -21,8 +21,6 @@ data PureType
   | TCon Id -- TODO: top, bottom, int, bool
   | TFunc PureType DirtyType
   | THandler DirtyType DirtyType
-  | TSum PureType PureType
-  | TProd PureType PureType 
   deriving (Eq, Ord)
 
 typeInt = TCon "Int"
@@ -59,8 +57,6 @@ instance Rename PureType where
     t@TCon{} -> t
     TFunc a d -> TFunc (apply s a) (apply s d)
     THandler d1 d2 -> THandler (apply s d1) (apply s d2)
-    TSum a b -> TSum (apply s a) (apply s b)
-    TProd a b -> TProd (apply s a) (apply s b)
 
   normalize' TVar{} = do
     xs <- get
@@ -69,8 +65,6 @@ instance Rename PureType where
   normalize' t@TCon{} = return t
   normalize' (TFunc a d) = TFunc <$> normalize' a <*> normalize' d
   normalize' (THandler d1 d2) = THandler <$> normalize' d1 <*> normalize' d2
-  normalize' (TSum a b) = TSum <$> normalize' a <*> normalize' b
-  normalize' (TProd a b) = TProd <$> normalize' a <*> normalize' b
 
 instance Rename DirtyType where
   apply s (DirtyType a d) = DirtyType (apply s a) (apply s d)
@@ -86,20 +80,18 @@ instance Rename Dirt where
     return (Dirt ops (DV (head xs)))
 
 instance Pretty PureType where
-  ppr _ (TVar (TV v)) = text' v
-  ppr _ (TCon c) = text' c
+  ppr _ (TVar (TV v)) = text v
+  ppr _ (TCon c) = text c
   ppr p (TFunc t1 (DirtyType a d)) = parensIf p $ ppr 1 t1 
                                        <+> "-{" <> ppr 1 d <> "}->" <+> ppr 1 a
   ppr p (THandler t1 t2) = parensIf p $ ppr 1 t1 <+> "=>" <+> ppr 1 t2
-  ppr p (TSum t1 t2) = parensIf p $ ppr 1 t1 <+> "+" <+> ppr 1 t2
-  ppr p (TProd t1 t2) = parensIf p $ ppr 1 t1 <+> "*" <+> ppr 1 t2
 
 instance Pretty DirtyType where
   ppr p (DirtyType t1 t2) = parensIf p $ ppr 1 t1 <> "!" <> ppr 1 t2
 
 instance Pretty Dirt where
-  ppr _ (Dirt t (DV d)) | Set.null t = text' d
-                        | otherwise = text (show (Set.toList t) ++ "|") <> text' d
+  ppr _ (Dirt t (DV d)) | Set.null t = text d
+                        | otherwise = text (show (Set.toList t) ++ "|") <> text d
 
 instance Show PureType where 
   show = render . pp 
