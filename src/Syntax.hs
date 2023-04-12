@@ -7,7 +7,7 @@ module Syntax
   , Computation(..), Lit(..), OpCase(..), Pattern(..), DoStmt(..)
   , AST(..), Decl(..), OpDecl(..), TypeTerm(..), Program(..)
   , traverseOcs
-  , TypeEntry(..), ConsSignature, OpSignature
+  , TypeEntry(..), ConsSignature, OpSignature, TermMap
   , nameResolution
   ) where
 
@@ -17,7 +17,6 @@ import qualified Data.Map as Map
 import Type
 import Common
 import qualified Data.Set.Monad as Set
-import Data.Maybe (mapMaybe)
 
 data Expr
   = Var Id
@@ -105,7 +104,7 @@ nameResolution (d:ds) =
   case d of
     TermDecl x e -> (Map.insert x e tm, cs, os)
     DataDecl x s -> let cs' = Map.fromList (map (f x) s)
-                        tm' = Map.fromList (mapMaybe g s)
+                        tm' = Map.fromList (map g s)
                      in (Map.union tm' tm, Map.union cs' cs, os)
     -- TODO: what to do with the `eff`?
     EffectDecl eff ops -> let os' = Map.fromList 
@@ -120,11 +119,10 @@ nameResolution (d:ds) =
 
     -- get a corresponding function version of the constructor
     -- if arity of the constructor is greater than 1
-    -- TODO: after desugaring finished
-    g :: TypeTerm -> Maybe (Id, Expr)
+    g :: TypeTerm -> (Id, Expr)
     g (TypeTerm cons@(ConsName conss) ts') 
-      | arity >= 1 = Just (conss, func)
-      | otherwise = Nothing
+      | arity >= 1 = (conss, func)
+      | otherwise = (conss, Cons cons [])
       where
         arity = length ts'
         params@(p:ps) = take arity letters

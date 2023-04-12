@@ -5,7 +5,9 @@
 module Infer.Infer 
   ( Constraint(..), runInfer, runInferIO
   , InferM, InferRes(..), Collect(..)
+  , Context(..), MonoCtx
   , Signature(..), emptySig
+  , showError
   ) where
 
 import Common
@@ -416,16 +418,17 @@ type InferM = ExceptT InferError (ReaderT Signature (WriterT String (State [Id])
 instance InferMonad InferM 
 
 runInfer :: Collect a r => a
+                        -> Context
                         -> Signature
                         -> (Either InferError (InferRes r), [Char])
-runInfer e signature = 
+runInfer e ctx signature = 
   evalState (runWriterT (runReaderT 
-    (runExceptT (collectConstraints emptyCtx e)) signature)) letters
+    (runExceptT (collectConstraints ctx e)) signature)) letters
 
 runInferIO :: (Show r, Collect p r) => p -> Signature 
                                     -> IO (Either InferError (InferRes r))
 runInferIO e signature = do
-    let (res, info) = runInfer e signature
+    let (res, info) = runInfer e emptyCtx signature
     case res of
       Right r -> putStrLn $ "the inferred result is: " ++ show r
       Left err -> red $ "error in typechecking: " ++ showError err

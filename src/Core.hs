@@ -2,16 +2,20 @@
 module Core 
   ( Expr(..), Arith(..), BOp(..), UOp(..)
   , Computation(..), Lit(..), OpCase(..), Result(..)
-  , exec'
+  , exec, ExecError(..), TermMap
   ) where
 
-import Prelude hiding ((<>))
-import qualified Data.Text as T
-import qualified Data.Set.Monad as Set
 import Text.PrettyPrint
 import Type
-import Utils.Pretty
 import Common
+import Utils.Pretty
+import Prelude hiding ((<>))
+import qualified Data.Set.Monad as Set
+import qualified Data.Map as Map
+import Control.Monad.Reader
+import Control.Monad.Except
+import qualified Debug.Trace as DT
+trace s a = DT.trace (s ++ "\n") a
 
 data Expr
   = Var Id
@@ -120,6 +124,8 @@ instance Show Expr where
   show = render . pp
 instance Show Computation where
   show = render . pp
+instance Show OpCase where
+  show = render . pp
 
 instance Show Result where
   show (VRet e) = render (pp (Ret e))
@@ -130,7 +136,7 @@ class AST a where
   binders :: a -> VarSet
   rename :: VarSet -> (Id, Id) -> a -> a
   -- names can only bind expressions
-  substitute :: (Id, Expr) -> a -> a
+  substitute :: VarSet -> (Id, Expr) -> a -> a
 
 instance AST Expr where
   freeVars (Var x)               = Set.singleton x
@@ -146,7 +152,7 @@ instance AST Expr where
   binders (Arith (BOp _ e1 e2)) = binders e1 \/ binders e2
   binders (Arith (UOp _ e))     = binders e
   binders (Abs x c)             = binders c \/ Set.singleton x
-  binders (Handler x _ c ocs)   = (binders c \/ Set.singleton x) \/ freeVars ocs
+  binders (Handler x _ c ocs)   = (binders c \/ Set.singleton x) \/ binders ocs
   binders (Cons _ es)           = Set.unions (binders <$> es)
 
   rename bindVars (a, b) (Var x) | Set.notMember x bindVars && x == a = Var b
@@ -158,17 +164,17 @@ instance AST Expr where
   rename bindVars s (Handler x a c ocs) = Handler x a (rename (Set.insert x bindVars) s c) (rename bindVars s ocs)
   rename bindVars s (Cons c es) = Cons c (rename bindVars s <$> es)
 
-  substitute (y, n) (Var x) | x == y = n
-                            | otherwise = Var x
-  substitute _ l@Lit{} = l
-  substitute s (Arith (BOp op e1 e2)) = Arith (BOp op (substitute s e1) (substitute s e2))
-  substitute s (Arith (UOp op e)) = Arith (UOp op (substitute s e))
-  substitute (x, n) (Abs y p) = let z = freshName (Set.insert x (freeVars n) \/ freeVars p \/ binders p)
-                                 in Abs z (substitute (x, n) (rename Set.empty (y, z) p))
-  substitute (x, n) (Handler y a c ocs) = let z = freshName (Set.insert x (freeVars n) \/ freeVars c \/ binders c)
-                                           in Handler z a (substitute (x, n) (rename Set.empty (y, z) c))
-                                                          (substitute (x, n) ocs)
-  substitute s (Cons c es) = Cons c (substitute s <$> es)
+  substitute bv (y, n) (Var x) | x == y = n
+                               | otherwise = Var x
+  substitute bv _ l@Lit{} = l
+  substitute bv s (Arith (BOp op e1 e2)) = Arith (BOp op (substitute bv s e1) (substitute bv s e2))
+  substitute bv s (Arith (UOp op e)) = Arith (UOp op (substitute bv s e))
+  substitute bv (x, n) (Abs y p) = let z = freshName (Set.insert x (freeVars n) \/ freeVars p \/ binders p \/ bv)
+                                    in Abs z (substitute (Set.insert z bv) (x, n) (rename Set.empty (y, z) p))
+  substitute bv (x, n) (Handler y a c ocs) = let z = freshName (Set.insert x (freeVars n) \/ freeVars c \/ binders c \/ bv)
+                                              in Handler z a (substitute (Set.insert z bv) (x, n) (rename Set.empty (y, z) c))
+                                                             (substitute bv (x, n) ocs)
+  substitute bv s (Cons c es) = Cons c (substitute bv s <$> es)
 
 instance AST OpCase where
   freeVars Nil{} = Set.empty
@@ -181,11 +187,11 @@ instance AST OpCase where
   rename bindVars s (OpCase op x k c ocs) = OpCase op x k (rename (bindVars \/ Set.fromList [x, k]) s c)
                                                           (rename bindVars s ocs)
 
-  substitute _ n@Nil{} = n
-  substitute (x, n) (OpCase op y k c ocs) = let fvs = Set.insert x (freeVars n) \/ freeVars c \/ binders c
-                                                [a, b] = take 2 (freshNames fvs)
-                                                c' = rename Set.empty (y, a) . rename Set.empty (k, b) $ c
-                                             in OpCase op a b (substitute (x, n) c') (substitute (x, n) ocs)
+  substitute _ _ n@Nil{} = n
+  substitute bv (x, n) (OpCase op y k c ocs) = let fvs = Set.insert x (freeVars n) \/ freeVars c \/ binders c \/ bv \/ Set.fromList [y,k]
+                                                   [a, b] = take 2 (freshNames fvs)
+                                                   c' = rename Set.empty (y, a) . rename Set.empty (k, b) $ c
+                                                in OpCase op a b (substitute (bv \/ Set.fromList [a, b]) (x, n) c') (substitute bv (x, n) ocs)
 
 instance AST Computation where
   freeVars (Ret e)                  = freeVars e
@@ -220,80 +226,120 @@ instance AST Computation where
       Absurd t e        -> Absurd t (rename' e)
       Let x e c         -> Let x (rename' e) (renameWith (Set.insert x bindVars) c)
       Do x c1 c2        -> Do x (rename' c1) (renameWith (Set.insert x bindVars) c2)
-      DoRec f x c1 c2   -> DoRec f x (rename' c1) (renameWith (bindVars \/ Set.fromList [f, x]) c2)
+      DoRec f x c1 c2   -> DoRec f x (renameWith (bindVars \/ Set.fromList [f, x]) c1) 
+                                     (renameWith (Set.insert f bindVars) c2)
       Case e c vs c1 c2 -> Case (rename' e) c vs (renameWith (bindVars \/ Set.fromList vs) c1) (rename' c2)
     where
       rename' :: AST a => a -> a
       rename' = rename bindVars s
       renameWith v = rename v s
 
-  substitute s@(x, n) cm =
+  substitute bv s@(x, n) cm =
     case cm of
       Ret e             -> Ret (subst' e)
       App e1 e2         -> App (subst' e1) (subst' e2)
       If e c1 c2        -> If (subst' e) (subst' c1) (subst' c2)
-      OpCall op e y c   -> let z = freshName (Set.insert x (freeVars n) \/ freeVars c \/ binders c)
-                            in OpCall op (subst' e) z (subst' (rename Set.empty (y, z) c))
+      OpCall op e y c   -> let z = freshName (Set.insert x (freeVars n) \/ freeVars c \/ binders c \/ bv)
+                            in OpCall op (subst' e) z (substWith (Set.insert z bv) (rename Set.empty (y, z) c))
       WithHandle h c    -> WithHandle (subst' h) (subst' c)
       Absurd t e        -> Absurd t (subst' e)
-      Let y e c         -> let z = freshName (Set.insert x (freeVars n) \/ freeVars c \/ binders c \/ freeVars e)
-                            in Let z (subst' e) (subst' (rename Set.empty (y, z) c))
+      Let y e c         -> let z = freshName (Set.insert x (freeVars n) \/ freeVars c \/ binders c \/ freeVars e \/ bv)
+                            in Let z (subst' e) (substWith (Set.insert z bv) (rename Set.empty (y, z) c))
       -- TODO: Is the freeVars c1` necessary?
-      Do y c1 c2        -> let z = freshName (Set.insert x (freeVars n) \/ freeVars c2 \/ binders c2 \/ freeVars c1)
-                            in Do z (subst' c1) (subst' (rename Set.empty (y, z) c2))
-      DoRec f y c1 c2   -> let fvs = Set.insert x (freeVars n) \/ freeVars c2 \/ binders c2 \/ freeVars c1
+      Do y c1 c2        -> let z = freshName (Set.insert x (freeVars n) \/ freeVars c2 \/ binders c2 \/ freeVars c1 \/ bv)
+                            in Do z (subst' c1) (substWith (Set.insert z bv) (rename Set.empty (y, z) c2))
+      DoRec f y c1 c2   -> let fvs = Set.insert x (freeVars n) \/ freeVars c2 \/ binders c2 \/ freeVars c1 \/ binders c1 \/ bv \/ Set.fromList [f, y]
                                [a, b] = take 2 (freshNames fvs)
-                            in DoRec a b (subst' c1)
-                                          (subst' (rename Set.empty (f, a) . rename Set.empty (y, b) $ c2))
-      Case e c vs c1 c2 -> let fvs = Set.insert x (freeVars n) \/ freeVars c1 \/ binders c1
+                            in DoRec a b (substWith (bv \/ Set.fromList [a, b]) (rename Set.empty (f, a) . rename Set.empty (y, b) $ c1))
+                                         (substWith (Set.insert f bv) (rename Set.empty (f, a) c2))
+      Case e c vs c1 c2 -> let fvs = Set.insert x (freeVars n) \/ freeVars c1 \/ binders c1 \/ bv
                                newvars = take (length vs) (freshNames fvs)
-                            in Case (subst' e) c newvars (subst' (foldr ($) c1 (rename Set.empty <$> zip vs newvars)))
+                            in Case (subst' e) c newvars (substWith (bv \/ Set.fromList newvars) (foldr ($) c1 (rename Set.empty <$> zip vs newvars)))
                                     (subst' c2)
     where
       subst' :: AST a => a -> a
-      subst' = substitute s
+      subst' = substitute bv s
+      substWith b = substitute b s
 
-exec' :: Computation -> Result
+type TermMap = Map.Map Id Expr
+type ExecM = ExceptT ExecError (Reader TermMap)
+data ExecError = UndefinedVariable Id
+               | IfConditionMismatch Expr
+               | ApplyNonFunction Expr
+               | ApplyNonHandler
+               deriving Eq
+
+instance Show ExecError where
+  show (UndefinedVariable v) = "undefined variable: " ++ v
+  show (IfConditionMismatch e) = "if condition mismatch: " ++ show e
+  show (ApplyNonFunction f) = "not a function: " ++ show f
+  show ApplyNonHandler = "not a handler"
+
+exec :: TermMap -> Computation -> Either ExecError Result
+exec ctx c = runReader (runExceptT (exec' c)) ctx
+
+exec' :: Computation -> ExecM Result
 -- TODO: Is this correct?
-exec' (Ret e) = VRet (eval e)
-exec' (OpCall op e x c) = VOpCall op e x c
-exec' (If e c1 c2) = case eval e of
-                      Lit (LBool True)  -> exec' c1
-                      Lit (LBool False) -> exec' c2
-                      _                 -> error "if condition mismatch"
+exec' (Ret e) = VRet <$> eval e
+exec' (OpCall op e x c) = return $ VOpCall op e x c
+exec' (If e c1 c2) = do
+    res <- eval e
+    case res of
+      Lit (LBool True)  -> exec' c1
+      Lit (LBool False) -> exec' c2
+      _                 -> throwError (IfConditionMismatch e)
 exec' Absurd{} = error "never execute absurd"
 
-exec' (App (Abs x c) e) = exec' (substitute (x, e) c)
-exec' App{} = error "not a function"
-exec' (Let x e c) = exec' (substitute (x, eval e) c)
-exec' (Do x c1 c2) = case exec' c1 of
-                            VRet e -> exec' (substitute (x, e) c2)
-                            VOpCall op e y c -> VOpCall op e y (Do x c c2)
-exec' (WithHandle h@(Handler xv a cv ocs) oc) =
-    case exec' oc of
-      VRet e -> exec' (substitute (xv, e) cv)
+exec' (App (Abs x c) e) = exec' (substitute Set.empty (x, e) c)
+exec' (App v@(Var _) e) = do
+  res <- eval v 
+  exec' (App res e)
+exec' a@(App e _) = throwError (ApplyNonFunction e)
+exec' (Let x e c) = do
+    res <- eval e
+    exec' (substitute Set.empty (x, res) c)
+exec' t@(Do x c1 c2) = do
+    res <- exec' c1
+    case res of
+      VRet e -> exec' (substitute Set.empty (x, e) c2)
+      VOpCall op e y c -> return $ VOpCall op e y (Do x c c2)
+exec' t@(WithHandle h@(Handler xv a cv ocs) oc) = do
+    res <- exec' oc
+    case res of
+      VRet e -> exec' (substitute Set.empty (xv, e) cv)
       VOpCall op e y c -> case lookupCase op ocs of
                             Just (xi, ki, ci) ->
-                              exec' (substitute (xi, e) . substitute (ki, Abs y (WithHandle h c)) $ ci)
-                            Nothing -> VOpCall op e y (WithHandle h c)
+                              exec' (substitute Set.empty (xi, e) . substitute Set.empty (ki, Abs y (WithHandle h c)) $ ci)
+                            Nothing -> return $ VOpCall op e y (WithHandle h c)
   where
     lookupCase :: OpTag -> OpCase -> Maybe (Id, Id, Computation)
     lookupCase _ Nil{} = Nothing
     lookupCase op (OpCase op' x k c ocs) | op == op' = Just (x, k, c)
                                          | otherwise = lookupCase op ocs
-exec' WithHandle{} = error "not a handler"
-exec' (DoRec f x c1 c2) = undefined
-exec' (Case e c vs c1 c2) = case eval e of
-                              Cons c' vs' -> if c == c' 
-                                then exec' (foldr ($) c1 (substitute <$> zip vs vs'))
-                                    -- error $ "\n debug: " ++ show (Case e c vs c1 c2)
-                                else exec' c2
-                              t -> error $ "pattern mismatch: " ++ show t
-                                        ++ "\n debug: "
-                                        ++ show (Case e c vs c1 c2)
+exec' (WithHandle h c) = do
+  x <- eval h
+  exec' (WithHandle x c)
+exec' WithHandle{} = throwError ApplyNonHandler
+exec' (DoRec f x c1 c2) = exec' $ substitute Set.empty (f, Abs x (DoRec f x c1 c1)) c2
+exec' (Case e c vs c1 c2) = do
+    res <- eval e
+    case res of
+      Cons c' vs' -> if c == c' 
+        then exec' (foldr ($) c1 (substitute Set.empty <$> zip vs vs'))
+            -- error $ "\n debug: " ++ show (Case e c vs c1 c2)
+        else exec' c2
+      t -> error $ "pattern mismatch: " ++ show t
+                ++ "\n debug: "
+                ++ show (Case e c vs c1 c2)
+
 -- builtin evaluation
-eval :: Expr -> Expr
-eval (Arith a) = Lit res
+eval :: Expr -> ExecM Expr
+eval (Var x) = do
+  ctx <- lift ask
+  case Map.lookup x ctx of
+    Just e -> return e
+    Nothing -> throwError (UndefinedVariable x)
+eval (Arith a) = return $ Lit res
   where
     res = case a of
             BOp Add (Lit (LInt i1))  (Lit (LInt i2))  -> LInt (i1 + i2)
@@ -308,5 +354,5 @@ eval (Arith a) = Lit res
             UOp Neg (Lit (LInt i)) -> LInt (- i)
             UOp Not (Lit (LBool b)) -> LBool (not b)
             _ -> error $ "mismatch: " ++ show a
-eval (Cons c es) = Cons c (eval <$> es)
-eval x = x
+eval (Cons c es) = Cons c <$> mapM eval es
+eval x = return x

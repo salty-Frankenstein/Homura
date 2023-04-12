@@ -86,8 +86,8 @@ pickTrue = handler "x" (ret "x")
                     ("k" <| true) 
                   nil)
 
-run = C.exec' . desugar
-cres = C.VRet . C.Lit . C.LInt
+run = C.exec Map.empty . desugar
+cres = Right . C.VRet . C.Lit . C.LInt
 
 -- t :: InferM (InferRes PureType)
 -- t = collectConstraints (Context Map.empty Map.empty) pickTrue

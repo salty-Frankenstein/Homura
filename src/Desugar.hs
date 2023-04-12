@@ -117,7 +117,9 @@ toCoreMatch x = let x' = step1 x
     -- the choice is heuristic, here I just take the first instead
     step2 :: GenMatch -> Either C.Computation (Id, S.Pattern)
     step2 (GenMatch ((GenMatchLn (x:_) _):_)) = Right x
-    step2 (GenMatch []) = error "Error: Non-exhaustive pattern match."
+    -- TODO: Error 
+    step2 (GenMatch []) = Left (C.OpCall (OpTag "error") (C.Lit C.LUnit) "?" (C.Ret (C.Lit C.LUnit)))
+                           -- error "Error: Non-exhaustive pattern match."
     step2 (GenMatch ((GenMatchLn [] c):_)) = Left (desugar c)
     -- step4: split the original patterns into two groups `A` and `B`
     step4 :: GenMatch 

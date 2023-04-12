@@ -4,8 +4,11 @@ module Lib.Arith where
 import Syntax
 import Lib.EDSL 
 
-add = fun ["x", "y"] $ ret (Expr' . Arith $ BOp Add (Var "x") (Var "y"))
-sub = fun ["x", "y"] $ ret (Expr' . Arith $ BOp Sub (Var "x") (Var "y"))
+genBinOP' op = Abs "x" ["y"] $ Ret (Arith $ BOp op (Var "x") (Var "y"))
+genBinOP op = fun ["x", "y"] $ ret (Expr' . Arith $ BOp op (Var "x") (Var "y"))
+add = genBinOP Add
+sub = genBinOP Sub
+binop' f x y = App f x [y]
 binop (Expr' f) (Expr' x) (Expr' y) = App f x [y]
 (?+) = binop add
 tx = i 6 ?+ i 8

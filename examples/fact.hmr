@@ -1,0 +1,11 @@
+letrec fact x = do {
+  b <- x == 0;
+  if b then pure 1
+  else do {
+    x' <- x - 1;
+    f' <- fact x';
+    x * f'
+  }
+}
+
+main = fact 4

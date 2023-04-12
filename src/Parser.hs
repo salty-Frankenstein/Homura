@@ -2,6 +2,7 @@ module Parser where
 
 import Common
 import Syntax
+import Lib.Arith
 import Type
 import Text.Parsec
 import Text.Parsec.String
@@ -13,10 +14,10 @@ import qualified Data.Set.Monad as Set
 reservedNames, reservedOpNames :: [String]
 reservedNames = ["handler", "pure", "if", "then", "else"
                 , "True", "False", "with", "handle"
-                , "absurd", "let", "do", "dorec", "case", "of"
+                , "absurd", "let", "do", "letrec", "case", "of"
                 , "data", "effect", "main"]
 reservedOpNames = ["+", "-", "*", "/", "==", "&&", "||"
-                  , "->", "|", "=", ":"]
+                  , "->", "|", "=", ":", "()"]
 hmrDef = T.LanguageDef
           { T.commentStart    = "{-"
           , T.commentEnd      = "-}"
@@ -33,9 +34,13 @@ hmrDef = T.LanguageDef
 lexer :: T.GenTokenParser String u Identity
 lexer = T.makeTokenParser hmrDef
 
+allID :: Parser String
+allID = T.identifier lexer
 identifier :: Parser String
-identifier = T.identifier lexer
--- semi = T.semi lexer
+identifier = try (lookAhead lower) >> allID
+typeId :: Parser String
+typeId = try (lookAhead upper) >> allID
+semi = T.semi lexer
 -- comma = T.comma lexer
 
 whiteSpace = T.whiteSpace lexer
@@ -52,38 +57,44 @@ braces :: Parser a -> Parser a
 braces = T.braces lexer
 
 parseOpTag = char '!' >> OpTag <$> identifier
-parseConsName = ConsName <$> identifier
+parseConsName = ConsName <$> typeId
+
 parens = T.parens lexer
 
 parseExpr :: Parser Expr
-parseExpr = parseVar
-        <|> parseLit
-        <|> parseAbs
-        <|> parseHandler
-        <|> parseCons
+parseExpr = try (parens parseExpr')
+        <|> parseExpr'
   where
-    parseVar = Var <$> identifier
+    parseExpr' = parseVar
+             <|> parseLit
+             <|> parseAbs
+             <|> parseHandler
+            --  <|> parseCons
+
+    parseVar = Var <$> allID
 
     parseLit = fmap Lit $ parseInt <|> parseBool <|> parseUnit
       where
-        parseInt = LInt . fromInteger <$> T.integer lexer
+        parseInt = LInt . fromInteger <$> T.natural lexer
         parseBool = fmap LBool $
                       (reserved "True" >> return True)
                   <|> (reserved "False" >> return False)
-        parseUnit = symbol "()" >> return LUnit
+        parseUnit = reservedOp "()" >> return LUnit
 
     parseAbs = symbol "\\" >>
       Abs <$> identifier <*> many identifier
-          <*> (symbol "." >> parseComputation)
+        <*> (symbol "." >> parseComputation)
 
-    parseHandler = do
-      reserved "handler"
+    parseHandler = reserved "handler" >> braces (do
+      reserved "pure"
       x <- identifier
+      reservedOp "->"
       c <- parseComputation
-      Handler x undefined c <$> parseOpCase
+      semi
+      Handler x undefined c <$> parseOpCase)
 
     parseOpCase = do
-      res <- braces (semiSep parseOp)
+      res <- semiSep parseOp
       return (foldr (\(op, x, k, c) l -> OpCase op x k c l)
                 (Nil undefined) res)
       where
@@ -95,21 +106,40 @@ parseExpr = parseVar
           c <- parseComputation
           return (op, x, k, c)
 
-    parseCons = Cons <$> parseConsName <*> many parseExpr
+    -- parseCons = Cons <$> parseConsName <*> many parseExpr
 
 
 parseComputation :: Parser Computation
-parseComputation = parseRet
-               <|> parseApp
-               <|> parseIf
-               <|> parseOpCall
-               <|> parseWithHandle
-               <|> parseAbsurd
-               <|> parseLet
-               <|> parseDo
-               <|> parseDoRec
-               <|> parseCase
+parseComputation = parens parseComputation'
+               <|> parseComputation'
   where
+    parseComputation' = parseRet
+                    <|> try parseApp
+                    <|> parseIf
+                    <|> parseOpCall
+                    <|> parseWithHandle
+                    <|> parseAbsurd
+                    <|> parseLet
+                    <|> parseDo
+                    <|> parseDoRec
+                    <|> parseCase
+                    <|> parseBinOp
+
+    parseBinOp = parseBinOp' "+" Add
+             <|> parseBinOp' "-" Sub
+             <|> parseBinOp' "*" Mul
+             <|> parseBinOp' "/" Div
+             <|> parseBinOp' "==" Eq
+             <|> parseBinOp' "<" Lt
+             <|> parseBinOp' ">" Gt
+             <|> parseBinOp' "&&" And
+             <|> parseBinOp' "||" Or
+      where
+        parseBinOp' ch op = try $ do
+          e1 <- parseExpr
+          reservedOp ch
+          binop' (genBinOP' op) e1 <$> parseExpr
+
     parseRet = reserved "pure" >> Ret <$> parseExpr
 
     parseApp = App <$> parseExpr <*> parseExpr <*> many parseExpr
@@ -131,10 +161,9 @@ parseComputation = parseRet
 
     parseWithHandle = do
       reserved "with"
-      h <- braces parseExpr
+      h <- parseExpr
       reserved "handle"
-      c <- braces parseComputation
-      return (WithHandle h c)
+      WithHandle h <$> parseComputation
 
     parseAbsurd = reserved "absurd" >> Absurd undefined <$> parseExpr
 
@@ -152,7 +181,7 @@ parseComputation = parseRet
           DoC c -> return (Do stmts c)
           _ -> parserFail "the last statement in do")
       where
-          parseDoStmt = parseBind <|> parseDoLet
+          parseDoStmt = try parseBind <|> parseDoLet
                     <|> (DoC <$> parseComputation)
 
           parseBind = do
@@ -161,12 +190,13 @@ parseComputation = parseRet
             Bind x <$> parseComputation
 
           parseDoLet = do
+            reserved "let"
             x <- identifier
             reservedOp "="
             DoLet x <$> parseExpr
 
     parseDoRec = do
-      reserved "dorec"
+      reserved "letrec"
       f <- identifier
       x <- identifier
       reservedOp "="
@@ -182,17 +212,35 @@ parseComputation = parseRet
       return (Case e res)
       where
         parseLine = do
-          p <- parsePattern
+          p <- parsePatternOuter
           reservedOp "->"
           c <- parseComputation
           return (p, c)
 
-        parsePattern = (reserved "_" >> return PWild)
-                   <|> PVar <$> identifier
-                   <|> (PCons <$> parseConsName <*> many parsePattern)
+        parsePatternOuter = parseWild
+                        <|> parsePVar
+                        <|> parsePCons'
+                        <|> parsePConsZero
+
+        parsePatternInner = parseWild
+                        <|> parsePVar
+                        <|> parsePCons
+
+        parseWild = reserved "_" >> return PWild
+        parsePVar = PVar <$> identifier
+        parsePCons = parens parsePCons'
+                 <|> parsePConsZero
+        parsePConsZero = do
+          cons <- parseConsName
+          return (PCons cons [])
+        parsePCons' = do
+          cons <- parseConsName
+          ps <- many parsePatternInner
+          return (PCons cons ps)
 
 parseDecl :: Parser Decl
 parseDecl = parseTermDecl
+        <|> parseTermDeclRec
         <|> parseDataDecl
         <|> parseEffectDecl
   where
@@ -202,11 +250,20 @@ parseDecl = parseTermDecl
       reservedOp "="
       TermDecl x <$> parseExpr
 
+    parseTermDeclRec = do
+      reserved "letrec"
+      f <- identifier
+      x <- identifier
+      reservedOp "="
+      c <- parseComputation
+      let res = TermDecl f (Abs x [] (DoRec f x c (App (Var f) (Var x) [])))
+      return res
+
     parseDataDecl = do
       reserved "data"
       decls <- sepBy parseTypeTerm (reservedOp "|")
       reservedOp ":"
-      x <- identifier
+      x <- typeId
       return (DataDecl x decls)
       where
         parseTypeTerm = TypeTerm <$> parseConsName <*> many parsePureType
@@ -228,7 +285,7 @@ parsePureType :: Parser PureType
 parsePureType = consCase <|> handCase
   where
     consCase = do
-      cons <- TCon <$> identifier
+      cons <- TCon <$> typeId
       rest <- parsePureType'
       case rest of
         Nothing -> return cons

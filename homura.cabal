@@ -30,6 +30,7 @@ library
       Desugar
       Infer.Infer
       Infer.Unify
+      Interpreter
       Lib.Arith
       Lib.EDSL
       Parser
