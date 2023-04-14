@@ -1,0 +1,29 @@
+data Nil | Cons Int IntList : IntList
+
+let alwaysRead s = pure (handler { !readInt x k -> k s })
+let reverse = handler { !print s k -> do { k (); !print(s) } }
+let collect = handler 
+  { pure x -> pure Nil 
+  | !print s k -> do {
+        res <- k ();
+        Cons s res }}
+
+let testIO _ = do {
+  x1 <- !readInt();
+  !print(x1);
+  x2 <- !readInt();
+  !print(x2);
+  sum <- x1 + x2;
+  !print(sum)
+}
+
+main = do {
+  -- testIO ()
+  alwaysRead42 <- alwaysRead 42;
+  -- with alwaysRead1 handle testIO ()
+  -- with reverse handle testIO ()
+  -- with collect handle testIO ()
+  with collect handle 
+    (with reverse handle 
+      (with alwaysRead42 handle testIO ()))
+}

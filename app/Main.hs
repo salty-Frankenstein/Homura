@@ -4,7 +4,7 @@ import Interpreter
 
 main :: IO ()
 main = do
-  let fileName = "./examples/pattern.hmr"
+  let fileName = "./examples/io.hmr"
   runInterpreter $ loadfile fileName
   -- res <- parseHmr fileName
   -- case res of

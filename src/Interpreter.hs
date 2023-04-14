@@ -53,8 +53,9 @@ loadfile fileName = do
       liftIO $ print cs
       liftIO $ print os
 
-      liftIO $ putStrLn "-------result---------"
+      liftIO $ putStrLn "-------executing---------"
       x <- runComputation c -- TODO
+      liftIO $ putStrLn "-------result---------"
       liftIO $ print x
       return ()
 
@@ -77,7 +78,7 @@ runComputation c = do
   InterpState tmR _ _ _ <- ask
   tm <- liftIO $ readIORef tmR
   let c' = desugar c 
-  return $ C.exec tm c'
+  liftIO $ C.exec tm c'
 
 getContext :: InterpretM (C.TermMap, MonoCtx, ConsSignature, OpSignature)
 getContext = do

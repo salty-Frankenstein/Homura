@@ -86,15 +86,19 @@ parseExpr = try (parens parseExpr')
         <*> (symbol "." >> parseComputation)
 
     parseHandler = reserved "handler" >> braces (do
+      (x, c) <- option ("x", Ret (Var "x")) parsePureCase
+      Handler x undefined c <$> parseOpCase)
+
+    parsePureCase = do
       reserved "pure"
       x <- identifier
       reservedOp "->"
       c <- parseComputation
-      semi
-      Handler x undefined c <$> parseOpCase)
-
+      reservedOp "|"
+      return (x, c)
+      
     parseOpCase = do
-      res <- semiSep parseOp
+      res <- sepBy parseOp (reservedOp "|")
       return (foldr (\(op, x, k, c) l -> OpCase op x k c l)
                 (Nil undefined) res)
       where
@@ -208,7 +212,7 @@ parseComputation = parens parseComputation'
       reserved "case"
       e <- parseExpr
       reserved "of"
-      res <- braces (semiSep parseLine)
+      res <- braces (sepBy parseLine (reservedOp "|"))
       return (Case e res)
       where
         parseLine = do
@@ -247,8 +251,12 @@ parseDecl = parseTermDecl
     parseTermDecl = do
       reserved "let"
       x <- identifier
+      params <- many (identifier <|> (reservedOp "_" >> return "_"))
       reservedOp "="
-      TermDecl x <$> parseExpr
+      case params of
+        [] -> TermDecl x <$> parseExpr
+        (p:ps) -> parserTrace "t" >> (TermDecl x . Abs p ps <$> parseComputation)
+          <* parserTrace "there"
 
     parseTermDeclRec = do
       reserved "letrec"
@@ -327,6 +335,7 @@ parseProgram :: Parser Program
 parseProgram = do
   whiteSpace
   decls <- many parseDecl
+  parserTrace "here"
   reserved "main"
   reservedOp "="
   Program decls <$> parseComputation

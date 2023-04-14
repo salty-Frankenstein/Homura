@@ -262,7 +262,7 @@ instance AST Computation where
       substWith b = substitute b s
 
 type TermMap = Map.Map Id Expr
-type ExecM = ExceptT ExecError (Reader TermMap)
+type ExecM = ExceptT ExecError (ReaderT TermMap IO)
 data ExecError = UndefinedVariable Id
                | IfConditionMismatch Expr
                | ApplyNonFunction Expr
@@ -275,8 +275,30 @@ instance Show ExecError where
   show (ApplyNonFunction f) = "not a function: " ++ show f
   show ApplyNonHandler = "not a handler"
 
-exec :: TermMap -> Computation -> Either ExecError Result
-exec ctx c = runReader (runExceptT (exec' c)) ctx
+exec :: TermMap -> Computation -> IO (Either ExecError Result)
+exec ctx c = runReaderT (runExceptT (execTop c)) ctx
+  where
+    -- handle default operations here
+    execTop :: Computation -> ExecM Result
+    execTop (OpCall op@(OpTag opt) e x c)
+      | opt == "print" = doOp $ \res -> do
+          liftIO $ print res
+          return (Lit LUnit)
+      | opt == "readInt" = doOp $ \_ -> do
+          res <- liftIO $ read <$> getLine
+          return (Lit (LInt res))
+          -- TODO: add more
+      | otherwise = return $ VOpCall op e x c
+      where
+        doOp :: (Expr -> ExecM Expr) -> ExecM Result
+        doOp cm = do
+          res <- eval e >>= cm
+          execTop (substitute Set.empty (x, res) c)
+    execTop c = do 
+      res <- exec' c
+      case res of
+        VOpCall op e x c -> execTop (OpCall op e x c)
+        x -> return x
 
 exec' :: Computation -> ExecM Result
 -- TODO: Is this correct?
@@ -316,7 +338,7 @@ exec' t@(WithHandle h@(Handler xv a cv ocs) oc) = do
     lookupCase _ Nil{} = Nothing
     lookupCase op (OpCase op' x k c ocs) | op == op' = Just (x, k, c)
                                          | otherwise = lookupCase op ocs
-exec' (WithHandle h c) = do
+exec' (WithHandle h@Var{} c) = do
   x <- eval h
   exec' (WithHandle x c)
 exec' WithHandle{} = throwError ApplyNonHandler
