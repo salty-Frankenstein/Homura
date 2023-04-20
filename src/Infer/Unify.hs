@@ -67,19 +67,10 @@ toConsSet (UnifiedConsSet p d) =
      Set.map (\(UnifiedCons a b) -> CPureTLE (typeVar a) (typeVar b)) p
   \/ Set.map (\(UnifiedCons a b) -> CDirtLE (dirtVar a) (dirtVar b)) d
 
--- TODO: fix this, define (?$) with apply
-instance Rename Constraint where
-  apply = undefined
-  free = undefined
-
 instance Substitutable Constraint where
   subst ?$ CPureTLE a b = CPureTLE (subst ?$ a) (subst ?$ b)
   subst ?$ CDirtyTLE d1 d2 = CDirtyTLE (subst ?$ d1) (subst ?$ d2)
   subst ?$ CDirtLE d1 d2 = CDirtLE (subst ?$ d1) (subst ?$ d2)
-
-instance Rename ConstraintSet where
-  apply = undefined
-  free = undefined
 
 instance Substitutable ConstraintSet where
   subst ?$ cs = (subst ?$) <$> cs
@@ -223,7 +214,50 @@ unify q'
 type UnifyM = StateT UnifyState (ExceptT String (Writer String))
 instance UnifyMonad UnifyM
 
-runUnify :: Set.Set Constraint -> (Either String UnifyState, String)
-runUnify q = runWriter $ runExceptT $ execStateT (unify q)
+class Monad m => UnifyErrorMonad m where
+  throwUnifyError :: String -> m a
+
+class Monad m => UnifyLogMonad m where
+  unifyLog :: String -> m ()
+
+runUnify' :: Set.Set Constraint -> (Either String UnifyState, String)
+runUnify' q = runWriter $ runExceptT $ execStateT (unify q)
                (UnifyState (fromPureMap []) emptyUniConsSet (map ('_':) letters))
 
+runUnify :: (UnifyErrorMonad m, UnifyLogMonad m) 
+         => Set.Set Constraint -> m (Substitution, UnifiedConsSet)
+runUnify q = do
+  let (res, ulog) = runUnify' q
+  unifyLog ulog
+  case res of
+    Left err -> throwUnifyError err
+    Right (UnifyState s c _) -> return (s, c)
+  
+---- garbage collecting --
+class Garbage a where
+  pos :: a -> VarSet
+  neg :: a -> VarSet
+
+instance Garbage PureType where
+  pos (TVar (TV a)) = Set.singleton a
+  pos TCon{} = Set.empty
+  pos (TFunc a c) = neg a \/ pos c
+  pos (THandler c d) = neg c \/ pos d
+
+  neg TVar{} = Set.empty
+  neg TCon{} = Set.empty
+  neg (TFunc a c) = pos a \/ neg c
+  neg (THandler c d) = pos c \/ neg d
+
+instance Garbage DirtyType where
+  pos (DirtyType a (Dirt _ (DV d))) = pos a \/ Set.singleton d
+  neg (DirtyType a _) = neg a
+
+-- given a unified constraint set & set of parameters p and n
+gc :: Garbage a => UnifiedConsSet -> a -> UnifiedConsSet
+gc (UnifiedConsSet pc dc) a = UnifiedConsSet ps ds
+  where
+    p = pos a
+    n = neg a
+    ps = [ c | c@(UnifiedCons an ap) <- pc, Set.member an n, Set.member ap p]
+    ds = [ c | c@(UnifiedCons dn dp) <- dc, Set.member dn n, Set.member dp p]

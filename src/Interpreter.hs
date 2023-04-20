@@ -33,13 +33,10 @@ instance Show InterpError where
   show (UnifyError e) = e
   show (RuntimeError e) = show e
 
-class ( 
-      --   InferMonad m
-      -- , UnifyMonad m
-        MonadReader InterpState m
+class ( MonadReader InterpState m
       , MonadError InterpError m
       , MonadIO m
-      ) => InterpretMonad m where
+      ) => InterpretMonad' m where
   getContext :: m (C.TermMap, PolyCtx, ConsSignature, OpSignature)
   getContext = do
     InterpState tmR pctxR csR osR <- ask
@@ -49,7 +46,26 @@ class (
     os <- liftIO $ readIORef osR
     return (tm, pctx, cs, os)
 
+class ( InterpretMonad' m
+      , InferErrorMonad m, InferLogMonad m
+      , UnifyErrorMonad m, UnifyLogMonad m
+      , ParseErrorMonad m
+      ) => InterpretMonad m 
+
 type InterpretM = (ReaderT InterpState (ExceptT InterpError IO))
+instance InferErrorMonad InterpretM where
+  throwInferError e = throwError (TypeInferError e)
+instance InferLogMonad InterpretM where
+  inferLog _ = return ()
+  -- inferLog s = liftIO $ yellow s >> hFlush stdout
+instance UnifyErrorMonad InterpretM where
+  throwUnifyError e = throwError (UnifyError e)
+instance UnifyLogMonad InterpretM where
+  unifyLog _ = return ()
+  -- unifyLog s = liftIO $ yellow s >> hFlush stdout
+instance ParseErrorMonad InterpretM where
+  throwParseError e = throwError (ParseError (show e))
+instance InterpretMonad' InterpretM 
 instance InterpretMonad InterpretM 
 
 runInterpreter :: InterpretM () -> IO ()
@@ -100,69 +116,61 @@ repl = do
 loadfile :: InterpretMonad m => FilePath -> m ()
 loadfile fileName = do
   ---------- parsing ----------
-  res <- liftIO $ parseHmr fileName
-  case res of
-    Left err -> throwError $ ParseError $ show err
-    Right (Program decls c) -> do
-      InterpState tmR pctxR csR osR <- ask
-      let (tm', cs', os') = nameResolution decls
-      liftIO $ modifyIORef' tmR (Map.union (Map.map desugar (Map.fromList tm')))
-      liftIO $ modifyIORef' csR (Map.union cs')
-      liftIO $ modifyIORef' osR (Map.union os')
+  Program decls c <- parseHmr fileName
+  InterpState tmR pctxR csR osR <- ask
+  let (tm', cs', os') = nameResolution decls
+  liftIO $ modifyIORef' tmR (Map.union (Map.map desugar (Map.fromList tm')))
+  liftIO $ modifyIORef' csR (Map.union cs')
+  liftIO $ modifyIORef' osR (Map.union os')
 
-      ------------- typechecking -------------
-      forM_ tm' $ \(a, b) -> do
-        liftIO $ putStrLn $ "now inferring: " ++ show a ++ ", " ++ show b
-        liftIO $ hFlush stdout
-        Res x y z <- typecheck b
-        liftIO $ putStrLn $ "inferred type: " ++ show (Forall x y z)
-        liftIO $ hFlush stdout
-        liftIO $ modifyIORef' pctxR (Map.insert a (Forall x y z))
+  ------------- typechecking -------------
+  forM_ tm' $ \(a, b) -> do
+    liftIO $ putStrLn $ "now inferring: " ++ show a ++ ", " ++ show b
+    liftIO $ hFlush stdout
+    Res x y z <- typecheck b
+    let t = normalize (Forall x y z)
+    liftIO $ putStrLn $ "inferred type: " ++ show t
+    liftIO $ hFlush stdout
+    liftIO $ modifyIORef' pctxR (Map.insert a t)
 
-      (tm, pctx, cs, os) <- getContext
-      liftIO $ putStrLn "the program is: "
-      liftIO $ print c
-      liftIO $ putStrLn "with context: "
-      liftIO $ print tm'
-      liftIO $ print pctx
-      liftIO $ print cs
-      liftIO $ print os
+  (tm, pctx, cs, os) <- getContext
+  liftIO $ putStrLn "the program is: "
+  liftIO $ print c
+  liftIO $ putStrLn "with context: "
+  liftIO $ print tm'
+  liftIO $ print pctx
+  liftIO $ print cs
+  liftIO $ print os
 
-      case c of
-        Just c -> do
-          --- typechecking the main program ---
-          _ <- typecheck c
-          liftIO $ putStrLn "-------executing---------"
-          x <- runComputation c -- TODO
-          liftIO $ putStrLn "-------result---------"
-          liftIO $ print x
-        Nothing -> return ()
+  case c of
+    Just c -> do
+      --- typechecking the main program ---
+      _ <- typecheck c
+      liftIO $ putStrLn "-------executing---------"
+      x <- runComputation c -- TODO
+      liftIO $ putStrLn "-------result---------"
+      liftIO $ print x
+    Nothing -> return ()
 
-typecheck :: ( Show r, Substitutable r, Collect a r
-             , InterpretMonad m
-             ) => a -> m (InferRes r)
+typecheck :: (-- Show r
+               Substitutable r, Collect a r, Garbage r
+             , InterpretMonad m) 
+          => a -> m (InferRes r)
 typecheck c = do
   (_, pctx, cs, os) <- getContext
-  -- Res f a cstr <- collectConstraints (Context Map.empty pctx) c
-  -- unify cstr
-  -- (s, c) <- getUnifyRes
-
-  -- undefined
-
-  let (res, log) = runInfer c (Context Map.empty pctx) (Signature cs os)
-  case res of
-    Left err -> throwError $ TypeInferError err
-    Right (Res f a cstr) -> do
-      let (res, _) = runUnify cstr
-      case res of
-        Left err -> throwError $ UnifyError err
-        Right (UnifyState s c _) -> do
-          let t = normalize $ s ?$ a
-          liftIO $ yellow log
-          liftIO $ hFlush stdout
-          liftIO $ red $ show a
-          liftIO $ green $ show (s ?$ a)
-          return (Res f t (toConsSet c))
+  Res f a cstr <- runInfer c (Context Map.empty pctx) (Signature cs os)
+  (s, c) <- runUnify cstr
+  -- let t = normalize $ s ?$ a
+  -- TODO: normalize constraints as well
+  -- liftIO $ red $ show a ++ " | " ++ show s
+  -- liftIO $ green $ show (s ?$ a)
+  ------ perform gc ------
+  let t = s ?$ a
+      c' = gc c t
+  -- liftIO $ red $ "original cons: " ++ show c
+  -- liftIO $ green $ "gc cons: " ++ show c'
+  let res' = Res (f /\ free t) t (toConsSet c')
+  return res'
 
 runComputation :: InterpretMonad m => Computation -> m C.Result
 runComputation c = do

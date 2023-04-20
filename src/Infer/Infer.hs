@@ -5,6 +5,7 @@
 module Infer.Infer 
   ( Constraint(..), runInfer, runInferIO
   , InferMonad, InferM, InferRes(..), Collect(..)
+  , InferErrorMonad(..), InferLogMonad(..)
   , Context(..), MonoCtx, PolyCtx, Scheme(..)
   , Signature(..), emptySig
   , InferError
@@ -26,11 +27,6 @@ data Constraint
   | CDirtLE Dirt Dirt              -- a dirt is smaller than another
   deriving (Eq, Ord)
 
-applyCons :: Map.Map Id Id -> Constraint -> Constraint
-applyCons s (CPureTLE a1 a2) = CPureTLE (apply s a1) (apply s a2)
-applyCons s (CDirtyTLE d1 d2) = CDirtyTLE (apply s d1) (apply s d2)
-applyCons s (CDirtLE d1 d2) = CDirtLE (apply s d1) (apply s d2)
-
 instance Show Constraint where
   show (CPureTLE p1 p2) = show p1 ++ " <= " ++ show p2
   show (CDirtyTLE d1 d2) = show d1 ++ " <= " ++ show d2
@@ -38,12 +34,32 @@ instance Show Constraint where
 
 type ConsSet = Set.Set Constraint
 
+instance Rename Constraint where
+  apply s (CPureTLE p1 p2) = CPureTLE (apply s p1) (apply s p2)
+  apply s (CDirtyTLE d1 d2) = CDirtyTLE (apply s d1) (apply s d2)
+  apply s (CDirtLE d1 d2) = CDirtLE (apply s d1) (apply s d2)
+
+  free = undefined
+
+instance Rename ConsSet where
+  apply s = Set.map (apply s)
+
+  free = undefined
+
 -- the type scheme, which includes a set of constraints on it
 -- it also represents the result of an inference
 data Scheme = Forall VarSet PureType ConsSet
 
+instance Rename Scheme where
+  normalize (Forall _ t c) = let s = evalState (normalize' t) letters
+                                 t' = apply s t
+                                 c' = apply s c
+                                 f' = free t'
+                              in Forall f' t' c'
+
 instance Show Scheme where
-  show (Forall f p c) = params ++ show p ++ cons
+  show (Forall f p c) = -- params ++ 
+                        show p ++ cons
     where params = if Set.null f then "" 
                    else "forall" ++ concat (Set.map (" "++) f) ++ "." 
           cons = if Set.null c then ""
@@ -136,7 +152,7 @@ instance Collect Expr PureType where
             f' = Set.fromList (snd <$> nn's)
             a' = apply s a
             -- substitute the captured constraints as well
-            cstr' = Set.map (applyCons s) cstr
+            cstr' = apply s cstr
         return (Res f' a' cstr')
       (Nothing, Nothing) -> throwError $ UndefinedVariable x
       _ -> error $ "internal error: mctx & pctx should be disjoint: " 
@@ -428,18 +444,32 @@ instance Collect Computation DirtyType where
 type InferM = ExceptT InferError (ReaderT Signature (WriterT String (State [Id]))) 
 instance InferMonad InferM 
 
-runInfer :: Collect a r => a
+class Monad m => InferLogMonad m where
+  inferLog :: String -> m ()
+
+class Monad m => InferErrorMonad m where
+  throwInferError :: InferError -> m a
+
+runInfer' :: Collect a r => a
                         -> Context
                         -> Signature
                         -> (Either InferError (InferRes r), [Char])
-runInfer e ctx signature = 
-  evalState (runWriterT (runReaderT 
-    (runExceptT (collectConstraints ctx e)) signature)) letters
+runInfer' e ctx signature = evalState (runWriterT (runReaderT 
+              (runExceptT (collectConstraints ctx e)) signature)) letters
+
+runInfer :: (InferErrorMonad m, InferLogMonad m, Collect a r) 
+         => a -> Context -> Signature -> m (InferRes r)
+runInfer e ctx signature = do
+  let (res, ilog) = runInfer' e ctx signature
+  inferLog ilog
+  case res of
+    Left err -> throwInferError err
+    Right res' -> return res'
 
 runInferIO :: (Show r, Collect p r) => p -> Signature 
                                     -> IO (Either InferError (InferRes r))
 runInferIO e signature = do
-    let (res, info) = runInfer e emptyCtx signature
+    let (res, info) = runInfer' e emptyCtx signature
     case res of
       Right r -> putStrLn $ "the inferred result is: " ++ show r
       Left err -> red $ "error in typechecking: " ++ show err

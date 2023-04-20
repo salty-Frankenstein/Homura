@@ -10,6 +10,7 @@ import Text.Parsec.Language
 import qualified Text.Parsec.Token as T
 import Control.Monad.Identity
 import qualified Data.Set.Monad as Set
+import Control.Monad.Except
 
 reservedNames, reservedOpNames :: [String]
 reservedNames = ["handler", "pure", "if", "then", "else"
@@ -258,8 +259,10 @@ parseDecl = parseTermDecl
       reservedOp "="
       case params of
         [] -> TermDecl x <$> parseExpr
-        (p:ps) -> parserTrace "t" >> (TermDecl x . Abs p ps <$> parseComputation)
-          <* parserTrace "there"
+        (p:ps) -> 
+          -- parserTrace "t" >> 
+          (TermDecl x . Abs p ps <$> parseComputation)
+          -- <* parserTrace "there"
 
     parseTermDeclRec = do
       reserved "letrec"
@@ -338,7 +341,7 @@ parseProgram :: Parser Program
 parseProgram = do
   whiteSpace
   decls <- many parseDecl
-  parserTrace "here"
+  -- parserTrace "here"
   Program decls <$> optionMaybe parseMain
   where
     parseMain = do
@@ -350,8 +353,14 @@ test = parse parseComputation "dummy"
 -- >>> test "do { x <- !read (1); pure 2 }"
 -- Right do { x <- read(1); (return 2) }
 
-parseHmr :: FilePath -> IO (Either ParseError Program)
+class ParseErrorMonad m where
+  throwParseError :: ParseError -> m a
+
+parseHmr :: (MonadIO m, ParseErrorMonad m) 
+         => FilePath -> m Program
 parseHmr fileName = do
-  code <- readFile fileName
+  code <- liftIO $ readFile fileName
   let res = parse parseProgram fileName code
-  return res
+  case res of
+    Left err -> throwParseError err
+    Right res' -> return res'

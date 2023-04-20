@@ -22,9 +22,10 @@ instance Show OpTag where
   show (OpTag t) = t
 
 infixr 5 \/
-(\/), (\\) :: Ord a => Set.Set a -> Set.Set a -> Set.Set a
+(\/), (\\), (/\) :: Ord a => Set.Set a -> Set.Set a -> Set.Set a
 (\/) = Set.union
 (\\) = (Set.\\)
+(/\) = Set.intersection
 
 (?:) :: Ord k => Map.Map k a -> (k, a) -> Map.Map k a
 m ?: (a, b) = Map.insert a b m

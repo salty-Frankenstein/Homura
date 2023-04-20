@@ -49,16 +49,16 @@ class Rename a where
   free :: a -> VarSet
 
   normalize :: a -> a
-  normalize a = evalState (normalize' a) letters
+  normalize a = let s = evalState (normalize' a) letters
+                 in apply s a
 
-  normalize' :: a -> State [Id] a
+  normalize' :: a -> State [Id] (Map.Map Id Id)
   normalize' a = do
     let fv = free a
     nn's <- forM (Set.toList fv) $ \n -> do
       n' <- getFreshName
       return (n, n')
-    let s = Map.fromList nn's
-    return (apply s a)
+    return (Map.fromList nn's)
     where
       getFreshName = do
         xs <- get
