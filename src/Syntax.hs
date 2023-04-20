@@ -13,10 +13,10 @@ module Syntax
 
 import Prelude hiding ((<>))
 import Text.PrettyPrint
-import qualified Data.Map as Map
 import Type
 import Common
 import qualified Data.Set.Monad as Set
+import qualified Data.Map as Map
 
 data Expr
   = Var Id
@@ -85,9 +85,10 @@ data Decl
 data TypeTerm = TypeTerm ConsName [PureType] -- the constructor & types of the prod
 data OpDecl = OpDecl OpTag PureType PureType
 
-data Program = Program [Decl] Computation
+data Program = Program [Decl] (Maybe Computation)
 
-type TermMap = Map.Map Id Expr
+-- HACK: now homura doesn't support use before decl, thus the TermMap is Ordered
+type TermMap = [(Id, Expr)]
 data TypeEntry = TypeEntry 
                    { retType :: PureType 
                    , arity :: Int
@@ -99,13 +100,13 @@ type ConsSignature = Map.Map ConsName TypeEntry
 type OpSignature = Map.Map OpTag (PureType, PureType)
 
 nameResolution :: [Decl] -> (TermMap, ConsSignature, OpSignature)
-nameResolution [] = (Map.empty, Map.empty, Map.empty)
+nameResolution [] = ([], Map.empty, Map.empty)
 nameResolution (d:ds) = 
   case d of
-    TermDecl x e -> (Map.insert x e tm, cs, os)
+    TermDecl x e -> ((x, e) : tm, cs, os)
     DataDecl x s -> let cs' = Map.fromList (map (f x) s)
-                        tm' = Map.fromList (map g s)
-                     in (Map.union tm' tm, Map.union cs' cs, os)
+                        tm' = map g s
+                     in (tm' ++ tm, Map.union cs' cs, os)
     -- TODO: what to do with the `eff`?
     EffectDecl eff ops -> let os' = Map.fromList 
                                       (map (\(OpDecl op t1 t2) -> (op, (t1, t2))) ops)

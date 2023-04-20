@@ -27,9 +27,8 @@ compose s1@(Substitution ps1 ds1) (Substitution ps2 ds2) =
     { pureMap = Map.map (s1 ?$) ps2 `Map.union` ps1
     , dirtMap = Map.map (s1 ?$) ds2 `Map.union` ds1 }
 
-class Substitutable a where
+class Rename a => Substitutable a where
   (?$) :: Substitution -> a -> a
-  free :: a -> VarSet
 
 instance Substitutable PureType where
   subst@(Substitution s _) ?$ t = case t of
@@ -38,21 +37,12 @@ instance Substitutable PureType where
     TFunc a d -> TFunc (subst ?$ a) (subst ?$ d)
     THandler d1 d2 -> THandler (subst ?$ d1) (subst ?$ d2)
 
-  free TCon{} = Set.empty
-  free (TVar (TV a)) = Set.singleton a
-  free (TFunc a1 a2) = free a1 \/ free a2
-  free (THandler d1 d2) = free d1 \/ free d2
-
 instance Substitutable DirtyType where
   subst ?$ DirtyType a d = DirtyType (subst ?$ a) (subst ?$ d)
-
-  free (DirtyType a d) = free a \/ free d
 
 instance Substitutable Dirt where
   Substitution _ s ?$ Dirt ops (DV d) = Dirt (ops \/ ops') d'
     where Dirt ops' d' = Map.findWithDefault (dirtVar d) d s
-
-  free (Dirt _ (DV d)) = Set.singleton d
 
 type ConstraintSet = Set.Set Constraint
 data UnifiedCons = UnifiedCons Id Id deriving (Eq, Ord)
@@ -77,16 +67,22 @@ toConsSet (UnifiedConsSet p d) =
      Set.map (\(UnifiedCons a b) -> CPureTLE (typeVar a) (typeVar b)) p
   \/ Set.map (\(UnifiedCons a b) -> CDirtLE (dirtVar a) (dirtVar b)) d
 
+-- TODO: fix this, define (?$) with apply
+instance Rename Constraint where
+  apply = undefined
+  free = undefined
+
 instance Substitutable Constraint where
   subst ?$ CPureTLE a b = CPureTLE (subst ?$ a) (subst ?$ b)
   subst ?$ CDirtyTLE d1 d2 = CDirtyTLE (subst ?$ d1) (subst ?$ d2)
   subst ?$ CDirtLE d1 d2 = CDirtLE (subst ?$ d1) (subst ?$ d2)
 
+instance Rename ConstraintSet where
+  apply = undefined
   free = undefined
 
 instance Substitutable ConstraintSet where
   subst ?$ cs = (subst ?$) <$> cs
-  free = undefined
 
 -- TODO: check if it keeps reflexive 
 -- the closure operator for pure types
@@ -120,6 +116,11 @@ class ( MonadState UnifyState m
       , MonadWriter String m
       , MonadError String m
       ) => UnifyMonad m where
+  getUnifyRes :: m (Substitution, UnifiedConsSet)
+  getUnifyRes = do
+    s <- get
+    return (subst s, consSet s)
+
   -- compose the current substitution with a given one
   composeWith :: Substitution -> m ()
   composeWith s' = modify (\(UnifyState s c n) -> UnifyState (compose s' s) c n)

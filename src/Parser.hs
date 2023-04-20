@@ -17,7 +17,7 @@ reservedNames = ["handler", "pure", "if", "then", "else"
                 , "absurd", "let", "do", "letrec", "case", "of"
                 , "data", "effect", "main"]
 reservedOpNames = ["+", "-", "*", "/", "==", "&&", "||"
-                  , "->", "|", "=", ":", "()"]
+                  , "->", "=>", "|", "=", ":", "()"]
 hmrDef = T.LanguageDef
           { T.commentStart    = "{-"
           , T.commentEnd      = "-}"
@@ -40,6 +40,9 @@ identifier :: Parser String
 identifier = try (lookAhead lower) >> allID
 typeId :: Parser String
 typeId = try (lookAhead upper) >> allID
+
+param :: Parser String
+param = identifier <|> (reservedOp "_" >> return "_")
 semi = T.semi lexer
 -- comma = T.comma lexer
 
@@ -82,7 +85,7 @@ parseExpr = try (parens parseExpr')
         parseUnit = reservedOp "()" >> return LUnit
 
     parseAbs = symbol "\\" >>
-      Abs <$> identifier <*> many identifier
+      Abs <$> param <*> many identifier
         <*> (symbol "." >> parseComputation)
 
     parseHandler = reserved "handler" >> braces (do
@@ -91,7 +94,7 @@ parseExpr = try (parens parseExpr')
 
     parsePureCase = do
       reserved "pure"
-      x <- identifier
+      x <- param
       reservedOp "->"
       c <- parseComputation
       reservedOp "|"
@@ -104,8 +107,8 @@ parseExpr = try (parens parseExpr')
       where
         parseOp = do
           op <- parseOpTag
-          x <- identifier
-          k <- identifier
+          x <- param
+          k <- param
           reservedOp "->"
           c <- parseComputation
           return (op, x, k, c)
@@ -251,7 +254,7 @@ parseDecl = parseTermDecl
     parseTermDecl = do
       reserved "let"
       x <- identifier
-      params <- many (identifier <|> (reservedOp "_" >> return "_"))
+      params <- many param
       reservedOp "="
       case params of
         [] -> TermDecl x <$> parseExpr
@@ -278,15 +281,15 @@ parseDecl = parseTermDecl
 
     parseEffectDecl = do
       reserved "effect"
-      x <- identifier
-      decls <- braces (semiSep parseOpDecl)
+      x <- typeId
+      decls <- braces (sepBy parseOpDecl (reservedOp "|"))
       return (EffectDecl x decls)
       where
         parseOpDecl = do
           op <- parseOpTag
           reservedOp ":"
           t1 <- parsePureType
-          reservedOp "->"
+          reservedOp "=>"
           OpDecl op t1 <$> parsePureType
 
 parsePureType :: Parser PureType
@@ -336,9 +339,12 @@ parseProgram = do
   whiteSpace
   decls <- many parseDecl
   parserTrace "here"
-  reserved "main"
-  reservedOp "="
-  Program decls <$> parseComputation
+  Program decls <$> optionMaybe parseMain
+  where
+    parseMain = do
+      reserved "main"
+      reservedOp "="
+      parseComputation
 
 test = parse parseComputation "dummy"
 -- >>> test "do { x <- !read (1); pure 2 }"

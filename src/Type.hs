@@ -46,10 +46,24 @@ class Rename a where
   -- apply a renaming mapping
   apply :: Map.Map Id Id -> a -> a
 
+  free :: a -> VarSet
+
   normalize :: a -> a
   normalize a = evalState (normalize' a) letters
 
   normalize' :: a -> State [Id] a
+  normalize' a = do
+    let fv = free a
+    nn's <- forM (Set.toList fv) $ \n -> do
+      n' <- getFreshName
+      return (n, n')
+    let s = Map.fromList nn's
+    return (apply s a)
+    where
+      getFreshName = do
+        xs <- get
+        put (tail xs)
+        return (head xs)
 
 instance Rename PureType where
   apply s t = case t of
@@ -58,26 +72,20 @@ instance Rename PureType where
     TFunc a d -> TFunc (apply s a) (apply s d)
     THandler d1 d2 -> THandler (apply s d1) (apply s d2)
 
-  normalize' TVar{} = do
-    xs <- get
-    put (tail xs)
-    return (TVar (TV (head xs)))
-  normalize' t@TCon{} = return t
-  normalize' (TFunc a d) = TFunc <$> normalize' a <*> normalize' d
-  normalize' (THandler d1 d2) = THandler <$> normalize' d1 <*> normalize' d2
+  free TCon{} = Set.empty
+  free (TVar (TV a)) = Set.singleton a
+  free (TFunc a1 a2) = free a1 \/ free a2
+  free (THandler d1 d2) = free d1 \/ free d2
 
 instance Rename DirtyType where
   apply s (DirtyType a d) = DirtyType (apply s a) (apply s d)
 
-  normalize' (DirtyType a d) = DirtyType <$> normalize' a <*> normalize' d
+  free (DirtyType a d) = free a \/ free d
 
 instance Rename Dirt where
   apply s (Dirt ops (DV d)) = Dirt ops (DV (Map.findWithDefault d d s))
 
-  normalize' (Dirt ops _) = do
-    xs <- get
-    put (tail xs)
-    return (Dirt ops (DV (head xs)))
+  free (Dirt _ (DV d)) = Set.singleton d
 
 instance Pretty PureType where
   ppr _ (TVar (TV v)) = text v

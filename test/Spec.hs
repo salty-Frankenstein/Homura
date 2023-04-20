@@ -118,14 +118,14 @@ main = do
   putStrLn ""
   -- tests for `case`
   let tests = testCase <$> testCaseinput
-      res = run <$> tests
-      expected = cres <$> [1, 3, 7, 3, 2, 4, 2, 7, 5, 6]
+  res <- mapM run tests
+  let expected = cres <$> [1, 3, 7, 3, 2, 4, 2, 7, 5, 6]
       test1 = TestCase . uncurry (assertEqual "test1") <$> zip res expected
 
   -- tests for handlers
-      res1 = run (pickTrue |=> chooseDiff)
-      res2 = run (pickMax |=> chooseDiff)
-      test2 = TestCase (assertEqual "test2" res1 (cres 10))
+  res1 <- run (pickTrue |=> chooseDiff)
+  res2 <- run (pickMax |=> chooseDiff)
+  let test2 = TestCase (assertEqual "test2" res1 (cres 10))
       test3 = TestCase (assertEqual "test3" res2 (cres 25))
   _ <- runTestTT (TestList $ test1 ++ [test2, test3])
 
@@ -139,6 +139,7 @@ main = do
   let poly2 = let' "const" (fun ["y", "x"] (ret "y"))
                 (let' "c1" (lam "x" .> ("const" .$ [i 1, "x"]))
                   (if' true ("c1" <| true) ("c1" <| i 1)))
+  -- testInfer (unwrapE $ lam "x" .> ret "x") emptySig
   testInfer poly1 emptySig
   testInfer poly2 emptySig
   testInfer (unwrapE choose) decideSig

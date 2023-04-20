@@ -4,10 +4,10 @@
 {-# LANGUAGE FlexibleInstances #-}
 module Infer.Infer 
   ( Constraint(..), runInfer, runInferIO
-  , InferM, InferRes(..), Collect(..)
-  , Context(..), MonoCtx
+  , InferMonad, InferM, InferRes(..), Collect(..)
+  , Context(..), MonoCtx, PolyCtx, Scheme(..)
   , Signature(..), emptySig
-  , showError
+  , InferError
   ) where
 
 import Common
@@ -39,7 +39,15 @@ instance Show Constraint where
 type ConsSet = Set.Set Constraint
 
 -- the type scheme, which includes a set of constraints on it
+-- it also represents the result of an inference
 data Scheme = Forall VarSet PureType ConsSet
+
+instance Show Scheme where
+  show (Forall f p c) = params ++ show p ++ cons
+    where params = if Set.null f then "" 
+                   else "forall" ++ concat (Set.map (" "++) f) ++ "." 
+          cons = if Set.null c then ""
+                 else " | " ++ show (Set.toList c)
 
 -- the normal typing context
 type MonoCtx = Map.Map Id PureType
@@ -72,14 +80,14 @@ data InferError = UndefinedOperation OpTag
                 | UndefinedVariable Id
                 | ConstructorArgMismatch ConsName Int Int
 
-showError :: InferError -> String
-showError (UndefinedOperation op) = "undefined operation: " ++ show op
-showError (UndefinedConstructor cons) = "undefined constructor: " ++ show cons
-showError (UndefinedVariable x) = "undefined variable: " ++ show x
-showError (ConstructorArgMismatch cons ex ac) = 
-    "the constructor " ++ show cons ++ "should have "
-    ++ show ex ++ " arguments, but has been given " 
-    ++ show ac
+instance Show InferError where
+  show (UndefinedOperation op) = "undefined operation: " ++ show op
+  show (UndefinedConstructor cons) = "undefined constructor: " ++ show cons
+  show (UndefinedVariable x) = "undefined variable: " ++ show x
+  show (ConstructorArgMismatch cons ex ac) = 
+      "the constructor " ++ show cons ++ "should have "
+      ++ show ex ++ " arguments, but has been given " 
+      ++ show ac
 
 class ( MonadState [Id] m        -- a stream of global fresh names
       , MonadReader Signature m  -- the input effect signatures
@@ -115,7 +123,9 @@ instance Collect Expr PureType where
   -- Cstr-Var & Cstr PolyVar
   collectConstraints (Context mctx pctx) (Var x) =
     case (Map.lookup x mctx, Map.lookup x pctx) of
-      (Just pt, Nothing) -> return (Res Set.empty pt Set.empty)
+      (Just pt, Nothing) -> 
+        tell (show pt) >>
+        return (Res Set.empty pt Set.empty)
       -- See: Inferring Algeff p. 19
       (Nothing, Just (Forall f a cstr)) -> do
         -- rename bound params F and obtain a fresh copy as each use
@@ -129,7 +139,8 @@ instance Collect Expr PureType where
             cstr' = Set.map (applyCons s) cstr
         return (Res f' a' cstr')
       (Nothing, Nothing) -> throwError $ UndefinedVariable x
-      _ -> error "internal error: mctx & pctx should be disjoint"
+      _ -> error $ "internal error: mctx & pctx should be disjoint: " 
+                ++ show x
   -- literals
   collectConstraints _ (Lit l) = do 
       let t = case l of
@@ -431,7 +442,7 @@ runInferIO e signature = do
     let (res, info) = runInfer e emptyCtx signature
     case res of
       Right r -> putStrLn $ "the inferred result is: " ++ show r
-      Left err -> red $ "error in typechecking: " ++ showError err
+      Left err -> red $ "error in typechecking: " ++ show err
     putStrLn "-------------------"
     yellow $ "infer log: " ++ info
     return res

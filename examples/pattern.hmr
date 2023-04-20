@@ -4,9 +4,8 @@ data Zero
    | Mul Expr Expr 
    : Expr
 
-data Nil 
-   | Cons Expr EList 
-   : EList
+data ENil | ECons Expr EList : EList
+data INil | ICons Int  IList : IList
 
 let testCase e = case e of 
   { Add Zero Zero   -> pure 1
@@ -17,14 +16,17 @@ let testCase e = case e of
   | Add x Zero      -> pure 6
   | x -> pure 7 }
 
-let state = handler 
-  { pure x      -> pure (\t . pure x)
-  | !get x k    -> pure (\s . k s s)
-  | !modify f k -> pure (\s . do { t <- f s; k () t }) }
+effect State { !get : Top => EList
+             | !set : EList => Top }
 
-let pushEntry e = !modify(\s . Cons e s)
+let state = handler { pure x   -> pure (\_ . pure x)
+                    | !get x k -> pure (\s . k s  s)
+                    | !set s k -> pure (\_ . k () s) }
+
+let pushEntry e = do { s <- !get(); s' <- ECons e s; !set(s'); !get() }
+
 let inputs _ = do {
-  succ1 <- Succ 1;         add11 <- Add 1 1;
+  succ1 <- Succ Zero;      add11 <- Add Zero Zero;
   t <- Add Zero  Zero;     pushEntry t;
   t <- Add succ1 Zero;     pushEntry t;
   t <- Add Zero  succ1;    pushEntry t;
@@ -39,15 +41,15 @@ let inputs _ = do {
 }
 
 letrec test l = case l of
-  { Cons x xs -> do {
+  { ECons x xs -> do {
       res <- testCase x;
       ress <- test xs;
-      Cons res ress }
-  | Nil -> pure Nil }
+      ICons res ress }
+  | ENil -> pure INil }
 
 main = do {
   f <- with state handle inputs ();
-  inputs <- f Nil;
-  test inputs
+  inputs' <- f ENil;
+  test inputs'
   -- expected: 6 5 7 2 4 2 3 7 3 1
 }

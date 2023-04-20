@@ -1,0 +1,14 @@
+{- this example shows how to use polymorphism in Homura -}
+
+let id x = pure x
+
+let const a b = pure a
+
+let fconst a b = const id a b
+
+main = do {
+  i42 <- id 42;
+  let const42 = \x . const i42 x;
+  b <- id True;
+  if b then const42 1 else const42 False
+}
