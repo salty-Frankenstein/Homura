@@ -118,7 +118,7 @@ parseExpr = try (parens parseExpr')
 
 
 parseComputation :: Parser Computation
-parseComputation = parens parseComputation'
+parseComputation = try (parens parseComputation')
                <|> parseComputation'
   where
     parseComputation' = parseRet
@@ -184,6 +184,7 @@ parseComputation = parens parseComputation'
 
     parseDo = reserved "do" >> braces (do
         stmts' <- semiSep parseDoStmt
+        when (null stmts') $ parserFail "empty do"
         let (stmts, ret) = (init stmts', last stmts')
         case ret of
           DoC c -> return (Do stmts c)
@@ -356,11 +357,20 @@ test = parse parseComputation "dummy"
 class ParseErrorMonad m where
   throwParseError :: ParseError -> m a
 
-parseHmr :: (MonadIO m, ParseErrorMonad m) 
-         => FilePath -> m Program
-parseHmr fileName = do
-  code <- liftIO $ readFile fileName
-  let res = parse parseProgram fileName code
+runParser' :: (MonadIO m, ParseErrorMonad m)
+          => Parser a -> FilePath -> String -> m a
+runParser' p f s = do
+  let res = parse p f s
   case res of
     Left err -> throwParseError err
     Right res' -> return res'
+
+runParseHmr :: (MonadIO m, ParseErrorMonad m) => FilePath -> m Program
+runParseHmr fileName = liftIO (readFile fileName)
+                   >>= runParser' parseProgram fileName 
+
+runParseExpr :: (MonadIO m, ParseErrorMonad m) => String -> m Expr
+runParseExpr = runParser' (parseExpr <* eof) "interactive"
+
+runParseComputation :: (MonadIO m, ParseErrorMonad m) => String -> m Computation
+runParseComputation = runParser' (parseComputation <* eof) "interactive"

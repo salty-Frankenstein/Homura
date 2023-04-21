@@ -6,7 +6,7 @@ module Infer.Infer
   ( Constraint(..), runInfer, runInferIO
   , InferMonad, InferM, InferRes(..), Collect(..)
   , InferErrorMonad(..), InferLogMonad(..)
-  , Context(..), MonoCtx, PolyCtx, Scheme(..)
+  , Context(..), MonoCtx, PolyCtx, Scheme(..), SchemeC(..)
   , Signature(..), emptySig
   , InferError
   ) where
@@ -49,6 +49,7 @@ instance Rename ConsSet where
 -- the type scheme, which includes a set of constraints on it
 -- it also represents the result of an inference
 data Scheme = Forall VarSet PureType ConsSet
+data SchemeC = ForallC VarSet DirtyType ConsSet
 
 instance Rename Scheme where
   normalize (Forall _ t c) = let s = evalState (normalize' t) letters
@@ -56,10 +57,24 @@ instance Rename Scheme where
                                  c' = apply s c
                                  f' = free t'
                               in Forall f' t' c'
+instance Rename SchemeC where
+  normalize (ForallC _ t c) = let s = evalState (normalize' t) letters
+                                  t' = apply s t
+                                  c' = apply s c
+                                  f' = free t'
+                               in ForallC f' t' c'
 
 instance Show Scheme where
   show (Forall f p c) = -- params ++ 
                         show p ++ cons
+    where params = if Set.null f then "" 
+                   else "forall" ++ concat (Set.map (" "++) f) ++ "." 
+          cons = if Set.null c then ""
+                 else " | " ++ show (Set.toList c)
+
+instance Show SchemeC where
+  show (ForallC f d c) = -- params ++ 
+                        show d ++ cons
     where params = if Set.null f then "" 
                    else "forall" ++ concat (Set.map (" "++) f) ++ "." 
           cons = if Set.null c then ""

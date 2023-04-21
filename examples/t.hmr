@@ -4,12 +4,11 @@ data Zero | Suc Nat : Nat
 let x = 1
 let y = \x . pure 1
 
-effect IO {
-  !read : unit -> String;
-  !print : String -> unit
-}
+effect IO 
+  { !read : Top => String
+  | !print : String => Top }
 
 main = do {
     x <- !read();
-    pure 2
+    pure 2;
   }

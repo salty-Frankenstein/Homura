@@ -2,7 +2,8 @@
 module Core 
   ( Expr(..), Arith(..), BOp(..), UOp(..)
   , Computation(..), Lit(..), OpCase(..), Result(..)
-  , exec, ExecError(..), TermMap
+  , exec, runEval, ExecError(..), TermMap
+  , RuntimeErrorMonad(throwRuntimeError)
   ) where
 
 import Text.PrettyPrint
@@ -76,7 +77,7 @@ instance Pretty Expr where
   ppr _ (Var x) = text x
   ppr p (Abs x a) = parensIf p $ char '\\' <>  text x <+> "." <+> pp a
   ppr p (Handler x _ c ocs) = parensIf p $ "handler" <+> braces body
-      where body = "return" <+> text x <+> "->" <+> pp c <> comma <+> pp ocs
+      where body = "pure" <+> text x <+> "->" <+> pp c <> comma <+> pp ocs
   ppr p (Arith a) = parensIf p body
     where
       body = case a of
@@ -105,7 +106,7 @@ instance Pretty OpCase where
     <+> "->" <+> pp c <+> semi <+> pp ocs
 
 instance Pretty Computation where
-  ppr p (Ret e) = parensIf p $ "return" <+> ppr (p+1) e
+  ppr p (Ret e) = parensIf p $ "pure" <+> ppr (p+1) e
   ppr p (App a b) = parensIf p $ ppr 1 a <+> ppr 1 b
   ppr p (If e c1 c2) = parensIf p $
       "if" <+> pp e <+> "then" <+> pp c1 <+> "else" <+> pp c2
@@ -275,8 +276,16 @@ instance Show ExecError where
   show (ApplyNonFunction f) = "not a function: " ++ show f
   show ApplyNonHandler = "not a handler"
 
-exec :: TermMap -> Computation -> IO (Either ExecError Result)
-exec ctx c = runReaderT (runExceptT (execTop c)) ctx
+class (Monad m) => RuntimeErrorMonad m where
+  throwRuntimeError :: ExecError -> m a
+  fromEither :: Either ExecError a -> m a
+  fromEither (Left err) = throwRuntimeError err
+  fromEither (Right r)  = return r
+
+exec :: (RuntimeErrorMonad m, MonadIO m)
+     => TermMap -> Computation -> m Result
+exec ctx c = liftIO (runReaderT (runExceptT (execTop c)) ctx)
+         >>= fromEither 
   where
     -- handle default operations here
     execTop :: Computation -> ExecM Result
@@ -353,6 +362,11 @@ exec' (Case e c vs c1 c2) = do
       t -> error $ "pattern mismatch: " ++ show t
                 ++ "\n debug: "
                 ++ show (Case e c vs c1 c2)
+
+runEval :: (RuntimeErrorMonad m, MonadIO m) 
+        => TermMap -> Expr -> m Expr
+runEval ctx e = liftIO (runReaderT (runExceptT (eval e)) ctx)
+            >>= fromEither
 
 -- builtin evaluation
 eval :: Expr -> ExecM Expr

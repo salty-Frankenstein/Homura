@@ -42,6 +42,8 @@ letters :: [Id]
 letters = [1..] >>= flip replicateM ['a'..'z']
 
 color d s = putStrLn $ d ++ s ++ "\ESC[0m"
+color' d s = putStr $ d ++ s ++ "\ESC[0m"
 red = color "\ESC[31m"
+red' = color' "\ESC[31m"
 yellow = color "\ESC[33m"
 green = color "\ESC[32m"

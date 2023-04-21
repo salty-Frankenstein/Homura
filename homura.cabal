@@ -46,9 +46,12 @@ library
       HUnit
     , base >=4.7 && <5
     , containers
+    , exceptions
+    , haskeline
     , mtl
     , parsec
     , pretty
+    , process
     , set-monad
     , text
   default-language: Haskell2010
@@ -64,10 +67,13 @@ executable homura-exe
       HUnit
     , base >=4.7 && <5
     , containers
+    , exceptions
+    , haskeline
     , homura
     , mtl
     , parsec
     , pretty
+    , process
     , set-monad
     , text
   default-language: Haskell2010
@@ -84,10 +90,13 @@ test-suite homura-test
       HUnit
     , base >=4.7 && <5
     , containers
+    , exceptions
+    , haskeline
     , homura
     , mtl
     , parsec
     , pretty
+    , process
     , set-monad
     , text
   default-language: Haskell2010

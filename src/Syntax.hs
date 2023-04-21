@@ -197,7 +197,7 @@ instance Pretty Expr where
   ppr _ (Var x) = text x
   ppr p (Abs x xs a) = parensIf p $ char '\\' <>  text x <+> hsep (text <$> xs) <+> "." <+> pp a
   ppr p (Handler x _ c ocs) = parensIf p $ "handler" <+> braces body
-      where body = "return" <+> text x <+> "->" <+> pp c <> comma <+> pp ocs
+      where body = "pure" <+> text x <+> "->" <+> pp c <> comma <+> pp ocs
   ppr p (Arith a) = parensIf p body
     where 
       body = case a of
@@ -226,7 +226,7 @@ instance Pretty OpCase where
     <+> "->" <+> pp c <+> semi <+> pp ocs
 
 instance Pretty Computation where 
-  ppr p (Ret e) = parensIf p $ "return" <+> ppr (p+1) e
+  ppr p (Ret e) = parensIf p $ "pure" <+> ppr (p+1) e
   ppr p (App a b es) = parensIf p $ ppr 1 a <+> ppr 1 b <+> hsep (ppr 1 <$> es)
   ppr p (If e c1 c2) = parensIf p $
       "if" <+> pp e <+> "then" <+> pp c1 <+> "else" <+> pp c2

@@ -28,6 +28,9 @@ dependencies:
 - HUnit
 - set-monad
 - parsec
+- haskeline
+- exceptions
+- process
 
 ghc-options:
 - -Wall
