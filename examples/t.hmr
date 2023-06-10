@@ -10,5 +10,5 @@ effect IO
 
 main = do {
     x <- !read();
-    pure 2;
+    pure 2
   }

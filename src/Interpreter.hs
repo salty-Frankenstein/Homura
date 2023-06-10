@@ -50,7 +50,7 @@ class ( MonadReader InterpState m
     cs <- liftIO $ readIORef csR
     os <- liftIO $ readIORef osR
     return (tm, pctx, cs, os)
-  
+
   interpLog :: String -> m ()
 
 class ( InterpretMonad' m
@@ -104,14 +104,18 @@ repl = do
   str <- getInputLine "homura> "
   case str of
     Nothing -> return ()
-    Just [] -> repl
     Just (':':cmd) -> doCmd cmd
     Just code -> catch (doCode code) errorHandler >> repl
   where
-    doCode code = lift $ catch doExpr $ \case
-                    ParseError _ -> doComp
+    doCode code = lift $ catch doWhite $ \case
+                    ParseError _ -> catch doExpr $ \case
+                      ParseError _ -> doComp
+                      e -> throwM e
                     e -> throwM e
       where
+        doWhite = do
+          runParseWhite code
+
         doExpr = do
           e <- runParseExpr code
           _ <- typecheckExpr e
@@ -124,22 +128,22 @@ repl = do
           res <- runComputation cm
           liftIO $ print res
 
-    doCmd s
-      | c == "q" = liftIO $ putStrLn "See you next time (o>_<)o"
-      | otherwise = do
+    doCmd s = case words s of
+      [] -> repl
+      c:xs -> 
+        if c == "q" then liftIO $ putStrLn "See you next time (o>_<)o"
+        else do
           case c of
             "l" -> catch (lift (mapM_ loadfile xs)) errorHandler
-            "t" -> catch doType errorHandler
+            "t" -> catch (doType xs) errorHandler
             "?" -> showHelp
-            "!" -> liftIO . void $ system (unwords xs) 
+            "!" -> liftIO . void $ system (unwords xs)
             "context" -> lift showContext
             _ -> liftIO $ putStrLn $ "unknown command " ++ show c ++
                                       "\nuse :? for help."
           repl
       where
-        (c:xs) = words s
-
-        doType = catch doExpr $ \case
+        doType xs = catch doExpr $ \case
             ParseError _ -> doComp
             e -> throwM e
           where
@@ -156,7 +160,7 @@ repl = do
               liftIO $ putStrLn $ show cm ++ " : " ++ show res
 
 
-    showHelp = liftIO $ do 
+    showHelp = liftIO $ do
       putStrLn "help >_<"
       let help = [ ("<statement>", "evaluate/run")
                  , (":l <filename>..", "load file(s)")

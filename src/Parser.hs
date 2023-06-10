@@ -46,6 +46,7 @@ param :: Parser String
 param = identifier <|> (reservedOp "_" >> return "_")
 semi = T.semi lexer
 -- comma = T.comma lexer
+white = T.whiteSpace lexer 
 
 whiteSpace = T.whiteSpace lexer
 semiSep = T.semiSep lexer
@@ -370,7 +371,10 @@ runParseHmr fileName = liftIO (readFile fileName)
                    >>= runParser' parseProgram fileName 
 
 runParseExpr :: (MonadIO m, ParseErrorMonad m) => String -> m Expr
-runParseExpr = runParser' (parseExpr <* eof) "interactive"
+runParseExpr = runParser' (white *> parseExpr <* eof) "interactive"
 
 runParseComputation :: (MonadIO m, ParseErrorMonad m) => String -> m Computation
-runParseComputation = runParser' (parseComputation <* eof) "interactive"
+runParseComputation = runParser' (white *> parseComputation <* eof) "interactive"
+
+runParseWhite :: (MonadIO m, ParseErrorMonad m) => String -> m ()
+runParseWhite = runParser' (white >> eof) "interactive"
