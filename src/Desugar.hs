@@ -19,6 +19,7 @@ instance Desugar S.Computation C.Computation where
                           f :: C.Computation -> S.Expr -> C.Computation
                           f c e = C.Do "*" c (C.App (C.Var "*") (desugar e)) 
                        in foldl f first es
+    S.Arith a -> C.Arith (desugar a)
     S.If e c1 c2 -> C.If (desugar e) (desugar c1) (desugar c2)
     S.OpCall op e -> C.OpCall op (desugar e) "y" (C.Ret (C.Var "y"))
     S.WithHandle e c -> C.WithHandle (desugar e) (desugar c)
@@ -40,7 +41,6 @@ instance Desugar S.Expr C.Expr where
                         f x' c' = C.Ret (C.Abs x' c')
                      in C.Abs x (foldr f (desugar c) xs)
     S.Handler x p c ocs -> C.Handler x p (desugar c) (desugar ocs)
-    S.Arith a -> C.Arith (desugar a)
     S.Cons c es -> C.Cons c (desugar <$> es)
 
 instance Desugar S.Lit C.Lit where

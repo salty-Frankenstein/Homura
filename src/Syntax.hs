@@ -24,7 +24,6 @@ data Expr
   | Abs Id [Id] Computation
   | Handler Id PureType Computation OpCase
   -- builtin arithmetrics
-  | Arith Arith
   | Cons ConsName [Expr]
 
 -- TODO: Add more
@@ -46,6 +45,7 @@ data OpCase
 data Computation
   = Ret Expr
   | App Expr Expr [Expr]
+  | Arith Arith
   | If Expr Computation Computation
   | OpCall OpTag Expr
   | WithHandle Expr Computation
@@ -135,8 +135,6 @@ class AST a where
 instance AST Expr where
   freeVars (Var x)               = Set.singleton x
   freeVars Lit{}                 = Set.empty
-  freeVars (Arith (BOp _ e1 e2)) = freeVars e1 \/ freeVars e2
-  freeVars (Arith (UOp _ e))     = freeVars e
   freeVars (Abs x xs c)          = freeVars c \\ Set.fromList (x:xs)
   freeVars (Handler x _ c ocs)   = (freeVars c \\ Set.singleton x) \/ freeVars ocs
   freeVars (Cons _ es)           = Set.unions (freeVars <$> es)
@@ -148,6 +146,8 @@ instance AST OpCase where
 instance AST Computation where
   freeVars (Ret e)                  = freeVars e
   freeVars (App e1 e2 es)           = freeVars e1 \/ freeVars e2 \/ Set.unions (freeVars <$> es)
+  freeVars (Arith (BOp _ e1 e2))    = freeVars e1 \/ freeVars e2
+  freeVars (Arith (UOp _ e))        = freeVars e
   freeVars (If e c1 c2)             = freeVars e \/ freeVars c1 \/ freeVars c2
   freeVars (OpCall (OpTag _) e)     = freeVars e
   freeVars (WithHandle h c)         = freeVars h \/ freeVars c
@@ -198,6 +198,18 @@ instance Pretty Expr where
   ppr p (Abs x xs a) = parensIf p $ char '\\' <>  text x <+> hsep (text <$> xs) <+> "." <+> pp a
   ppr p (Handler x _ c ocs) = parensIf p $ "handler" <+> braces body
       where body = "pure" <+> text x <+> "->" <+> pp c <> comma <+> pp ocs
+  ppr p (Cons (ConsName c) es) = parensIf p $ text c <+> hsep (parens.ppr 0 <$> es)
+
+instance Pretty OpCase where 
+  ppr _ Nil{} = empty
+  ppr _ (OpCase (OpTag op) x k c ocs) = 
+        text op
+    <>  parens (text x <> semi <> text k) 
+    <+> "->" <+> pp c <+> semi <+> pp ocs
+
+instance Pretty Computation where 
+  ppr p (Ret e) = parensIf p $ "pure" <+> ppr (p+1) e
+  ppr p (App a b es) = parensIf p $ ppr 1 a <+> ppr 1 b <+> hsep (ppr 1 <$> es)
   ppr p (Arith a) = parensIf p body
     where 
       body = case a of
@@ -216,18 +228,6 @@ instance Pretty Expr where
                  case uop of
                    Neg -> text "-" <+> pp v
                    Not -> text "!" <+> pp v
-  ppr p (Cons (ConsName c) es) = parensIf p $ text c <+> hsep (parens.ppr 0 <$> es)
-
-instance Pretty OpCase where 
-  ppr _ Nil{} = empty
-  ppr _ (OpCase (OpTag op) x k c ocs) = 
-        text op
-    <>  parens (text x <> semi <> text k) 
-    <+> "->" <+> pp c <+> semi <+> pp ocs
-
-instance Pretty Computation where 
-  ppr p (Ret e) = parensIf p $ "pure" <+> ppr (p+1) e
-  ppr p (App a b es) = parensIf p $ ppr 1 a <+> ppr 1 b <+> hsep (ppr 1 <$> es)
   ppr p (If e c1 c2) = parensIf p $
       "if" <+> pp e <+> "then" <+> pp c1 <+> "else" <+> pp c2
   ppr p (OpCall (OpTag op) x) = text op 

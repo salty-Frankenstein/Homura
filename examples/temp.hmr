@@ -1,0 +1,14 @@
+
+effect IO 
+  { !read : Top => String
+  | !print : String => Top }
+
+let h = handler { pure x   -> pure x
+                | !print x k -> pure () }
+                  
+let t f = with h handle f 1
+                    
+main = do {
+    x <- !read();
+    pure 2
+  }

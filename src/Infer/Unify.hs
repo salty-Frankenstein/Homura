@@ -44,7 +44,6 @@ instance Substitutable Dirt where
   Substitution _ s ?$ Dirt ops (DV d) = Dirt (ops \/ ops') d'
     where Dirt ops' d' = Map.findWithDefault (dirtVar d) d s
 
-type ConstraintSet = Set.Set Constraint
 data UnifiedCons = UnifiedCons Id Id deriving (Eq, Ord)
 data UnifiedConsSet = UnifiedConsSet
                         { pureCons :: Set.Set UnifiedCons
@@ -62,7 +61,7 @@ instance Show UnifiedCons where
 (?\) :: UnifiedConsSet -> UnifiedConsSet -> UnifiedConsSet
 (UnifiedConsSet x1 x2) ?\ (UnifiedConsSet y1 y2) = UnifiedConsSet (x1 \\ y1) (x2 \\ y2)
 
-toConsSet :: UnifiedConsSet -> ConstraintSet
+toConsSet :: UnifiedConsSet -> ConsSet
 toConsSet (UnifiedConsSet p d) = 
      Set.map (\(UnifiedCons a b) -> CPureTLE (typeVar a) (typeVar b)) p
   \/ Set.map (\(UnifiedCons a b) -> CDirtLE (dirtVar a) (dirtVar b)) d
@@ -72,7 +71,7 @@ instance Substitutable Constraint where
   subst ?$ CDirtyTLE d1 d2 = CDirtyTLE (subst ?$ d1) (subst ?$ d2)
   subst ?$ CDirtLE d1 d2 = CDirtLE (subst ?$ d1) (subst ?$ d2)
 
-instance Substitutable ConstraintSet where
+instance Substitutable ConsSet where
   subst ?$ cs = (subst ?$) <$> cs
 
 -- TODO: check if it keeps reflexive 
@@ -145,7 +144,7 @@ pop s | Set.null s = undefined
       | otherwise = (Set.findMax s, Set.deleteMax s)
 
 -- the unification algorithm
-unify :: UnifyMonad m => ConstraintSet -> m ()
+unify :: UnifyMonad m => ConsSet -> m ()
 unify q' 
   | Set.null q' = return ()
   | otherwise = let (h, q) = pop q' in case h of
@@ -261,3 +260,16 @@ gc (UnifiedConsSet pc dc) a = UnifiedConsSet ps ds
     n = neg a
     ps = [ c | c@(UnifiedCons an ap) <- pc, Set.member an n, Set.member ap p]
     ds = [ c | c@(UnifiedCons dn dp) <- dc, Set.member dn n, Set.member dp p]
+
+-- displaying simplificatoin
+-- suppose the consset is already garbage collected
+simplifyDirtVar :: UnifiedConsSet -> UnifiedConsSet
+simplifyDirtVar = undefined
+
+
+class Simplify a where
+  simplify :: a -> a
+
+instance Simplify Scheme where
+  simplify (Forall f t c) = undefined
+    

@@ -24,7 +24,6 @@ data Expr
   | Abs Id Computation
   | Handler Id PureType Computation OpCase
   -- builtin arithmetrics
-  | Arith Arith
   | Cons ConsName [Expr]
   deriving Eq
 
@@ -49,6 +48,7 @@ data OpCase
 data Computation
   = Ret Expr
   | App Expr Expr
+  | Arith Arith
   | If Expr Computation Computation
   | OpCall OpTag Expr Id Computation
   | WithHandle Expr Computation
@@ -78,6 +78,17 @@ instance Pretty Expr where
   ppr p (Abs x a) = parensIf p $ char '\\' <>  text x <+> "." <+> pp a
   ppr p (Handler x _ c ocs) = parensIf p $ "handler" <+> braces body
       where body = "pure" <+> text x <+> "->" <+> pp c <> comma <+> pp ocs
+  ppr p (Cons (ConsName c) es) = parensIf p $ text c <+> parens (hsep (ppr 0 <$> es))
+
+instance Pretty OpCase where
+  ppr _ Nil{} = empty
+  ppr _ (OpCase (OpTag op) x k c ocs) =
+        text op
+    <>  parens (text x <> semi <> text k)
+    <+> "->" <+> pp c <+> semi <+> pp ocs
+
+instance Pretty Computation where
+  ppr p (Ret e) = parensIf p $ "pure" <+> ppr (p+1) e
   ppr p (Arith a) = parensIf p body
     where
       body = case a of
@@ -96,17 +107,6 @@ instance Pretty Expr where
                  case uop of
                    Neg -> text "-" <+> pp v
                    Not -> text "!" <+> pp v
-  ppr p (Cons (ConsName c) es) = parensIf p $ text c <+> parens (hsep (ppr 0 <$> es))
-
-instance Pretty OpCase where
-  ppr _ Nil{} = empty
-  ppr _ (OpCase (OpTag op) x k c ocs) =
-        text op
-    <>  parens (text x <> semi <> text k)
-    <+> "->" <+> pp c <+> semi <+> pp ocs
-
-instance Pretty Computation where
-  ppr p (Ret e) = parensIf p $ "pure" <+> ppr (p+1) e
   ppr p (App a b) = parensIf p $ ppr 1 a <+> ppr 1 b
   ppr p (If e c1 c2) = parensIf p $
       "if" <+> pp e <+> "then" <+> pp c1 <+> "else" <+> pp c2
@@ -142,16 +142,12 @@ class AST a where
 instance AST Expr where
   freeVars (Var x)               = Set.singleton x
   freeVars Lit{}                 = Set.empty
-  freeVars (Arith (BOp _ e1 e2)) = freeVars e1 \/ freeVars e2
-  freeVars (Arith (UOp _ e))     = freeVars e
   freeVars (Abs x c)             = freeVars c \\ Set.singleton x
   freeVars (Handler x _ c ocs)   = (freeVars c \\ Set.singleton x) \/ freeVars ocs
   freeVars (Cons _ es)           = Set.unions (freeVars <$> es)
 
   binders (Var x)               = Set.empty
   binders Lit{}                 = Set.empty
-  binders (Arith (BOp _ e1 e2)) = binders e1 \/ binders e2
-  binders (Arith (UOp _ e))     = binders e
   binders (Abs x c)             = binders c \/ Set.singleton x
   binders (Handler x _ c ocs)   = (binders c \/ Set.singleton x) \/ binders ocs
   binders (Cons _ es)           = Set.unions (binders <$> es)
@@ -159,8 +155,6 @@ instance AST Expr where
   rename bindVars (a, b) (Var x) | Set.notMember x bindVars && x == a = Var b
                                  | otherwise = Var x
   rename _ _ l@Lit{} = l
-  rename bindVars s (Arith (BOp op e1 e2)) = Arith (BOp op (rename bindVars s e1) (rename bindVars s e2))
-  rename bindVars s (Arith (UOp op e)) = Arith (UOp op (rename bindVars s e))
   rename bindVars s (Abs x c) = Abs x (rename (Set.insert x bindVars) s c)
   rename bindVars s (Handler x a c ocs) = Handler x a (rename (Set.insert x bindVars) s c) (rename bindVars s ocs)
   rename bindVars s (Cons c es) = Cons c (rename bindVars s <$> es)
@@ -168,8 +162,6 @@ instance AST Expr where
   substitute bv (y, n) (Var x) | x == y = n
                                | otherwise = Var x
   substitute bv _ l@Lit{} = l
-  substitute bv s (Arith (BOp op e1 e2)) = Arith (BOp op (substitute bv s e1) (substitute bv s e2))
-  substitute bv s (Arith (UOp op e)) = Arith (UOp op (substitute bv s e))
   substitute bv (x, n) (Abs y p) = let z = freshName (Set.insert x (freeVars n) \/ freeVars p \/ binders p \/ bv)
                                     in Abs z (substitute (Set.insert z bv) (x, n) (rename Set.empty (y, z) p))
   substitute bv (x, n) (Handler y a c ocs) = let z = freshName (Set.insert x (freeVars n) \/ freeVars c \/ binders c \/ bv)
@@ -197,6 +189,8 @@ instance AST OpCase where
 instance AST Computation where
   freeVars (Ret e)                  = freeVars e
   freeVars (App e1 e2)              = freeVars e1 \/ freeVars e2
+  freeVars (Arith (BOp _ e1 e2))    = freeVars e1 \/ freeVars e2
+  freeVars (Arith (UOp _ e))        = freeVars e
   freeVars (If e c1 c2)             = freeVars e \/ freeVars c1 \/ freeVars c2
   freeVars (OpCall (OpTag _) e y c) = freeVars e \/ (freeVars c \\ Set.singleton y)
   freeVars (WithHandle h c)         = freeVars h \/ freeVars c
@@ -204,10 +198,12 @@ instance AST Computation where
   freeVars (Let x e c)              = freeVars c \/ (freeVars e \\ Set.singleton x)
   freeVars (Do x c1 c2)             = freeVars c1 \/ (freeVars c2 \\ Set.singleton x)
   freeVars (DoRec f x c1 c2)        = freeVars c1 \/ (freeVars c2 \\ Set.fromList [f, x])
-  freeVars (Case e _ vs c1 c2)   = freeVars e \/ (freeVars c1 \\ Set.fromList vs) \/ freeVars c2
+  freeVars (Case e _ vs c1 c2)      = freeVars e \/ (freeVars c1 \\ Set.fromList vs) \/ freeVars c2
 
   binders (Ret e)                  = binders e
   binders (App e1 e2)              = binders e1 \/ binders e2
+  binders (Arith (BOp _ e1 e2))    = binders e1 \/ binders e2
+  binders (Arith (UOp _ e))        = binders e
   binders (If e c1 c2)             = binders e \/ binders c1 \/ binders c2
   binders (OpCall (OpTag _) e y c) = binders e \/ (binders c \/ Set.singleton y)
   binders (WithHandle h c)         = binders h \/ binders c
@@ -217,6 +213,8 @@ instance AST Computation where
   binders (DoRec f x c1 c2)        = binders c1 \/ (binders c2 \/ Set.fromList [f, x])
   binders (Case e _ vs c1 c2)      = binders e \/ binders c1 \/ binders c2 \/ Set.fromList vs
 
+  rename bindVars s (Arith (BOp op e1 e2)) = Arith (BOp op (rename bindVars s e1) (rename bindVars s e2))
+  rename bindVars s (Arith (UOp op e)) = Arith (UOp op (rename bindVars s e))
   rename bindVars s cm =
     case cm of
       Ret e             -> Ret (rename' e)
@@ -235,6 +233,8 @@ instance AST Computation where
       rename' = rename bindVars s
       renameWith v = rename v s
 
+  substitute bv s (Arith (BOp op e1 e2)) = Arith (BOp op (substitute bv s e1) (substitute bv s e2))
+  substitute bv s (Arith (UOp op e)) = Arith (UOp op (substitute bv s e))
   substitute bv s@(x, n) cm =
     case cm of
       Ret e             -> Ret (subst' e)
@@ -326,6 +326,21 @@ exec' (App v@(Var _) e) = do
   res <- eval v 
   exec' (App res e)
 exec' a@(App e _) = throwError (ApplyNonFunction e)
+exec' (Arith a) = return $ VRet $ Lit res
+  where
+    res = case a of
+            BOp Add (Lit (LInt i1))  (Lit (LInt i2))  -> LInt (i1 + i2)
+            BOp Sub (Lit (LInt i1))  (Lit (LInt i2))  -> LInt (i1 - i2)
+            BOp Mul (Lit (LInt i1))  (Lit (LInt i2))  -> LInt (i1 * i2)
+            BOp Div (Lit (LInt i1))  (Lit (LInt i2))  -> LInt (div i1 i2)
+            BOp Eq  (Lit (LInt i1))  (Lit (LInt i2))  -> LBool (i1 == i2)
+            BOp Lt  (Lit (LInt i1))  (Lit (LInt i2))  -> LBool (i1 < i2)
+            BOp Gt  (Lit (LInt i1))  (Lit (LInt i2))  -> LBool (i1 > i2)
+            BOp And (Lit (LBool b1)) (Lit (LBool b2)) -> LBool (b1 && b2)
+            BOp Or  (Lit (LBool b1)) (Lit (LBool b2)) -> LBool (b1 || b2)
+            UOp Neg (Lit (LInt i)) -> LInt (- i)
+            UOp Not (Lit (LBool b)) -> LBool (not b)
+            _ -> error $ "mismatch: " ++ show a
 exec' (Let x e c) = do
     res <- eval e
     exec' (substitute Set.empty (x, res) c)
@@ -375,20 +390,5 @@ eval (Var x) = do
   case Map.lookup x ctx of
     Just e -> return e
     Nothing -> throwError (UndefinedVariable x)
-eval (Arith a) = return $ Lit res
-  where
-    res = case a of
-            BOp Add (Lit (LInt i1))  (Lit (LInt i2))  -> LInt (i1 + i2)
-            BOp Sub (Lit (LInt i1))  (Lit (LInt i2))  -> LInt (i1 - i2)
-            BOp Mul (Lit (LInt i1))  (Lit (LInt i2))  -> LInt (i1 * i2)
-            BOp Div (Lit (LInt i1))  (Lit (LInt i2))  -> LInt (div i1 i2)
-            BOp Eq  (Lit (LInt i1))  (Lit (LInt i2))  -> LBool (i1 == i2)
-            BOp Lt  (Lit (LInt i1))  (Lit (LInt i2))  -> LBool (i1 < i2)
-            BOp Gt  (Lit (LInt i1))  (Lit (LInt i2))  -> LBool (i1 > i2)
-            BOp And (Lit (LBool b1)) (Lit (LBool b2)) -> LBool (b1 && b2)
-            BOp Or  (Lit (LBool b1)) (Lit (LBool b2)) -> LBool (b1 || b2)
-            UOp Neg (Lit (LInt i)) -> LInt (- i)
-            UOp Not (Lit (LBool b)) -> LBool (not b)
-            _ -> error $ "mismatch: " ++ show a
 eval (Cons c es) = Cons c <$> mapM eval es
 eval x = return x

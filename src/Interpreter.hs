@@ -23,7 +23,7 @@ import Text.PrettyPrint
 
 data InterpState = InterpState
                      { termMap :: IORef C.TermMap
-                     , monoCtx :: IORef PolyCtx
+                     , polyCtx :: IORef PolyCtx
                      , consSig :: IORef ConsSignature
                      , opSig   :: IORef OpSignature }
 
