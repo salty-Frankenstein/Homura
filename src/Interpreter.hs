@@ -92,7 +92,8 @@ runInterpreter m = do
     Left err -> print err
     Right _ -> return ()
   where
-    definedOp = Map.fromList [(OpTag "print", (typeInt, typeTop))]
+    definedOp = Map.fromList [(OpTag "print", (typeInt, typeTop))
+                             ,(OpTag "readInt", (typeTop, typeInt))]
 
 runRepl :: InterpretM ()
 runRepl = do
@@ -198,6 +199,8 @@ loadfile fileName = do
   ------------- typechecking -------------
   forM_ tm' $ \(a, b) -> do
     interpLog $ "now inferring: " ++ show a ++ ", " ++ show b
+    (_, pctx, _, _) <- getContext
+    interpLog $ show pctx
     t <- typecheckExpr b
     interpLog $ "inferred type: " ++ show t
     liftIO $ modifyIORef' pctxR (Map.insert a t)
@@ -232,6 +235,7 @@ typecheck :: (-- Show r
           => a -> m (InferRes r)
 typecheck c = do
   (_, pctx, cs, os) <- getContext
+  interpLog $ show pctx
   Res f a cstr <- runInfer c (Context Map.empty pctx) (Signature cs os)
   (s, c) <- runUnify cstr
   ------ perform gc ------

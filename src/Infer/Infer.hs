@@ -219,7 +219,8 @@ instance Collect Expr PureType where
       ress <- forM ocs $ \(opi, xi, ki, ci) -> do
                 (_A, _B) <- lookupOpSignature opi
                 -- TODO: check why it's no pctx here
-                collectConstraints (Context (mctx ?: (xi, _A) ?: (ki, TFunc _B _D)) Map.empty) ci
+                -- collectConstraints (Context (mctx ?: (xi, _A) ?: (ki, TFunc _B _D)) Map.empty) ci
+                collectConstraints (Context (mctx ?: (xi, _A) ?: (ki, TFunc _B _D)) pctx) ci
       -- collect all constraints `cstrRes`
       let cstrRes = cstrv 
                  \/ Set.unions (constraints <$> ress)
@@ -480,6 +481,7 @@ runInfer :: (InferErrorMonad m, InferLogMonad m, Collect a r)
 runInfer e ctx signature = do
   let (res, ilog) = runInfer' e ctx signature
   inferLog ilog
+  -- let Context c1 c2 = ctx in inferLog (show c1 ++ "!!!" ++ show c2)
   case res of
     Left err -> throwInferError err
     Right res' -> return res'
