@@ -6,9 +6,13 @@ let const a b = pure a
 
 let fconst a b = const id a b
 
+
 main = do {
   i42 <- id 42;
   let const42 = \x . const i42 x;
   b <- id True;
   if b then const42 1 else const42 False
 }
+
+-- (\f . do { b <- f True; if b then f 1 else f 2 }) id
+

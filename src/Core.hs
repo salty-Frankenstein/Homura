@@ -78,7 +78,8 @@ instance Pretty Expr where
   ppr p (Abs x a) = parensIf p $ char '\\' <>  text x <+> "." <+> pp a
   ppr p (Handler x _ c ocs) = parensIf p $ "handler" <+> braces body
       where body = "pure" <+> text x <+> "->" <+> pp c <> comma <+> pp ocs
-  ppr p (Cons (ConsName c) es) = parensIf p $ text c <+> parens (hsep (ppr 0 <$> es))
+  ppr _ (Cons (ConsName c) []) = text c
+  ppr p (Cons (ConsName c) es) = parensIf p $ text c <+> hsep (ppr 1 <$> es)
 
 instance Pretty OpCase where
   ppr _ Nil{} = empty
